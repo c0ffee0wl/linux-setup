@@ -43,6 +43,21 @@ is_kali_linux() {
     grep -q "Kali" /etc/os-release 2>/dev/null
 }
 
+# Check if desktop environment is available
+has_desktop_environment() {
+    # Check for various desktop environment indicators
+    if [[ -n "$DISPLAY" ]] || [[ -n "$WAYLAND_DISPLAY" ]]; then
+        return 0
+    fi
+    # Check for common desktop environment processes/services
+    if systemctl is-active --quiet graphical-session.target 2>/dev/null || \
+       pgrep -f "xfce4-session\|gnome-session\|kde-session\|lxsession" > /dev/null 2>&1 || \
+       command -v xfconf-query &> /dev/null; then
+        return 0
+    fi
+    return 1
+}
+
 if ! is_kali_linux; then
     warn "This script is designed for Kali Linux. Continuing anyway ..."
 fi
@@ -62,8 +77,6 @@ sudo apt-get install -y \
     curl \
     wget \
     git \
-    gedit \
-    gedit-plugins \
     fzf \
     tree \
     hstr \
@@ -74,10 +87,7 @@ sudo apt-get install -y \
     moreutils \
     unp \
     exiftool \
-    fonts-firacode \
-    terminator \
     libpcap-dev \
-    meld \
     ufw \
     python3-dev \
     python3-pip \
@@ -88,6 +98,19 @@ sudo apt-get install -y \
     nodejs \
     npm \
     zsh
+
+# Install GUI applications if desktop environment is available
+if has_desktop_environment; then
+    log "Desktop environment detected - installing GUI applications"
+    sudo apt-get install -y \
+        gedit \
+        gedit-plugins \
+        fonts-firacode \
+        terminator \
+        meld
+else
+    log "No desktop environment detected - skipping GUI applications"
+fi
 
 # Install Kali-specific package - only install on Kali Linux
 if is_kali_linux; then
@@ -160,15 +183,16 @@ if [[ -d /home/"$USER"/.docker ]]; then
 fi
 
 # Install Visual Studio Code
-log "Installing Visual Studio Code..."
-if ! command -v code &> /dev/null; then
-    sudo apt-get install -y wget gpg
-    wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > microsoft.gpg
-    sudo install -D -o root -g root -m 644 microsoft.gpg /usr/share/keyrings/microsoft.gpg
-    rm -f microsoft.gpg
-    
-    # Create VSCode sources file
-    sudo tee /etc/apt/sources.list.d/vscode.sources > /dev/null << 'EOF'
+if has_desktop_environment; then
+    log "Installing Visual Studio Code..."
+    if ! command -v code &> /dev/null; then
+        sudo apt-get install -y wget gpg
+        wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > microsoft.gpg
+        sudo install -D -o root -g root -m 644 microsoft.gpg /usr/share/keyrings/microsoft.gpg
+        rm -f microsoft.gpg
+        
+        # Create VSCode sources file
+        sudo tee /etc/apt/sources.list.d/vscode.sources > /dev/null << 'EOF'
 Types: deb
 URIs: https://packages.microsoft.com/repos/code
 Suites: stable
@@ -176,12 +200,15 @@ Components: main
 Architectures: amd64,arm64,armhf
 Signed-By: /usr/share/keyrings/microsoft.gpg
 EOF
-    
-    sudo apt-get install -y apt-transport-https
-    sudo apt-get update
-    sudo apt-get install -y code
+        
+        sudo apt-get install -y apt-transport-https
+        sudo apt-get update
+        sudo apt-get install -y code
+    else
+        log "Visual Studio Code is already installed"
+    fi
 else
-    log "Visual Studio Code is already installed"
+    log "No desktop environment detected - skipping Visual Studio Code installation"
 fi
 
 # Install enhancd (enhanced cd command)
@@ -203,24 +230,32 @@ else
 fi
 
 # Disable screensaver and power management
-log "Disabling screensaver and power save options..."
-if command -v xfconf-query &> /dev/null; then
-    # Disable screensaver and lock screen (create setting if it doesn't exist)
-    xfconf-query -c xfce4-screensaver -p /saver/enabled --create -t bool -s false
-    xfconf-query -c xfce4-screensaver -p /lock/enabled --create -t bool -s false
-    
-    # Disable Display Power Management entirely
-    xfconf-query -c xfce4-power-manager -p /xfce4-power-manager/dpms-enabled --create -t bool -s false
+if has_desktop_environment; then
+    log "Disabling screensaver and power save options..."
+    if command -v xfconf-query &> /dev/null; then
+        # Disable screensaver and lock screen (create setting if it doesn't exist)
+        xfconf-query -c xfce4-screensaver -p /saver/enabled --create -t bool -s false
+        xfconf-query -c xfce4-screensaver -p /lock/enabled --create -t bool -s false
+        
+        # Disable Display Power Management entirely
+        xfconf-query -c xfce4-power-manager -p /xfce4-power-manager/dpms-enabled --create -t bool -s false
+    else
+        warn "xfconf-query not available, skipping power management configuration"
+    fi
 else
-    warn "xfconf-query not available, skipping power management configuration"
+    log "No desktop environment detected - skipping screensaver configuration"
 fi
 
 # Set Terminator as default terminal
-log "Setting Terminator as default terminal..."
-mkdir -p ~/.config/xfce4
-cat > ~/.config/xfce4/helpers.rc << 'EOF'
+if has_desktop_environment; then
+    log "Setting Terminator as default terminal..."
+    mkdir -p ~/.config/xfce4
+    cat > ~/.config/xfce4/helpers.rc << 'EOF'
 TerminalEmulator=terminator
 EOF
+else
+    log "No desktop environment detected - skipping terminal configuration"
+fi
 
 # Configure zsh with Kali Linux default baseline plus enhancements
 log "Configuring zsh..."
@@ -604,8 +639,9 @@ else
 fi
 
 # Configure Terminator
-log "Configuring Terminator..."
-mkdir -p ~/.config/terminator
+if has_desktop_environment; then
+    log "Configuring Terminator..."
+    mkdir -p ~/.config/terminator
 cat > ~/.config/terminator/config << 'EOF'
 [global_config]
   focus = mouse
@@ -660,21 +696,24 @@ cat > ~/.config/terminator/config << 'EOF'
 [plugins]
 EOF
 
-# Install Terminator tab numbers plugin
-log "Installing Terminator tab numbers plugin..."
-if [[ ! -d ~/.config/terminator/plugins ]]; then
-    mkdir -p ~/.config/terminator/plugins
-fi
+    # Install Terminator tab numbers plugin
+    log "Installing Terminator tab numbers plugin..."
+    if [[ ! -d ~/.config/terminator/plugins ]]; then
+        mkdir -p ~/.config/terminator/plugins
+    fi
 
-if [[ ! -f ~/.config/terminator/plugins/tab_numbers.py ]]; then
-    wget -O ~/.config/terminator/plugins/tab_numbers.py https://raw.githubusercontent.com/c0ffee0wl/terminator-tab-numbers-plugin/main/tab_numbers.py
-    if [[ $? -eq 0 ]]; then
-        log "Terminator tab numbers plugin installed successfully"
+    if [[ ! -f ~/.config/terminator/plugins/tab_numbers.py ]]; then
+        wget -O ~/.config/terminator/plugins/tab_numbers.py https://raw.githubusercontent.com/c0ffee0wl/terminator-tab-numbers-plugin/main/tab_numbers.py
+        if [[ $? -eq 0 ]]; then
+            log "Terminator tab numbers plugin installed successfully"
+        else
+            warn "Failed to download Terminator tab numbers plugin"
+        fi
     else
-        warn "Failed to download Terminator tab numbers plugin"
+        log "Terminator tab numbers plugin is already installed"
     fi
 else
-    log "Terminator tab numbers plugin is already installed"
+    log "No desktop environment detected - skipping Terminator configuration"
 fi
 
 # Install Project Discovery tool manager (Kali-specific tools)
@@ -760,12 +799,16 @@ else
 fi
 
 # Configure Xfce keyboard layout to German
-log "Configuring Xfce keyboard layout to German..."
-if command -v xfconf-query &> /dev/null; then
-    xfconf-query -c keyboard-layout -p /Default/XkbDisable --create -t bool -s false
-    xfconf-query -c keyboard-layout -p /Default/XkbLayout --create -t string -s "de"
+if has_desktop_environment; then
+    log "Configuring Xfce keyboard layout to German..."
+    if command -v xfconf-query &> /dev/null; then
+        xfconf-query -c keyboard-layout -p /Default/XkbDisable --create -t bool -s false
+        xfconf-query -c keyboard-layout -p /Default/XkbLayout --create -t string -s "de"
+    else
+        warn "xfconf-query not available, skipping keyboard layout configuration"
+    fi
 else
-    warn "xfconf-query not available, skipping keyboard layout configuration"
+    log "No desktop environment detected - skipping keyboard layout configuration"
 fi
 
 log "Setup complete!"
