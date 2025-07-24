@@ -728,7 +728,7 @@ fi
 
 if is_kali_linux; then
 
-# Install Project Discovery tool manager (Kali-specific tools)
+    # Install Project Discovery tool manager (Kali-specific tools)
     log "Installing Project Discovery tool manager..."
     if ! command -v pdtm &> /dev/null; then
         go install -v github.com/projectdiscovery/pdtm/cmd/pdtm@latest
@@ -744,7 +744,7 @@ if is_kali_linux; then
         warn "pdtm installation failed, skipping tool installation"
     fi
 
-# Install BloodHoundAnalyzer (Kali-specific tools)
+    # Install BloodHoundAnalyzer (Kali-specific tools)
     if [[ ! -d /opt/BloodHoundAnalyzer ]]; then
         log "Installing BloodHoundAnalyzer..."
         sudo git clone --depth=1 https://github.com/c0ffee0wl/BloodHoundAnalyzer /opt/BloodHoundAnalyzer
@@ -754,7 +754,7 @@ if is_kali_linux; then
         log "BloodHoundAnalyzer is already installed"
     fi
 
-# Install Python tools with uv (Kali-specific tools)
+    # Install Python tools with uv (Kali-specific tools)
     log "Installing Python tools for Kali with uv..."
     if command -v uv &> /dev/null; then
         uv tool install bbot
