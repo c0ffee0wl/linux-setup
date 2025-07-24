@@ -108,6 +108,16 @@ if has_desktop_environment; then
         fonts-firacode \
         terminator \
         meld
+        
+    # Configure GTK terminal padding
+    log "Configuring GTK terminal padding..."
+    mkdir -p ~/.config/gtk-3.0
+    cat > ~/.config/gtk-3.0/gtk.css << 'EOF'
+VteTerminal, TerminalScreen, vte-terminal {
+    padding: 8px 8px 8px 8px; /* Top Right Bottom Left */
+    -VteTerminal-inner-border: 8px 8px 8px 8px; /* Older versions might need this */
+}
+EOF
 else
     log "No desktop environment detected - skipping GUI applications"
 fi
@@ -716,8 +726,9 @@ else
     log "No desktop environment detected - skipping Terminator configuration"
 fi
 
-# Install Project Discovery tool manager (Kali-specific tools)
 if is_kali_linux; then
+
+# Install Project Discovery tool manager (Kali-specific tools)
     log "Installing Project Discovery tool manager..."
     if ! command -v pdtm &> /dev/null; then
         go install -v github.com/projectdiscovery/pdtm/cmd/pdtm@latest
@@ -732,12 +743,8 @@ if is_kali_linux; then
     else
         warn "pdtm installation failed, skipping tool installation"
     fi
-else
-    warn "Skipping Project Discovery tools installation - designed for Kali Linux"
-fi
 
 # Install BloodHoundAnalyzer (Kali-specific tools)
-if is_kali_linux; then
     if [[ ! -d /opt/BloodHoundAnalyzer ]]; then
         log "Installing BloodHoundAnalyzer..."
         sudo git clone --depth=1 https://github.com/c0ffee0wl/BloodHoundAnalyzer /opt/BloodHoundAnalyzer
@@ -746,12 +753,8 @@ if is_kali_linux; then
     else
         log "BloodHoundAnalyzer is already installed"
     fi
-else
-    warn "Skipping BloodHoundAnalyzer installation - designed for Kali Linux"
-fi
 
 # Install Python tools with uv (Kali-specific tools)
-if is_kali_linux; then
     log "Installing Python tools for Kali with uv..."
     if command -v uv &> /dev/null; then
         uv tool install bbot
@@ -759,8 +762,9 @@ if is_kali_linux; then
     else
         warn "uv not available, skipping Python tools installation"
     fi
+    
 else
-    warn "Skipping Kali uv installation - only available on Kali Linux"
+    log "Skipping Kali tools installation"
 fi
 
 # Install and configure ufw-docker
