@@ -776,7 +776,7 @@ else
     log "ufw-docker is already installed"
 fi
 log "Enable ufw and ufw-docker with: "
-log "sudo ufw enable && sudu ufw-docker install && sudo systemctl restart ufw"
+log "sudo ufw enable && sudo ufw-docker install && sudo systemctl restart ufw"
 
 # Configure systemd-resolved to disable stub listener if installed
 log "Configuring systemd-resolved..."
