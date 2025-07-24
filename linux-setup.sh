@@ -741,6 +741,22 @@ log "Performing final cleanup..."
 sudo apt-get autoremove -y
 sudo apt-get autoclean
 
+# Configure systemd-resolved to disable stub listener if installed
+log "Configuring systemd-resolved..."
+if systemctl is-active --quiet systemd-resolved 2>/dev/null; then
+    log "systemd-resolved is active, configuring..."
+    sudo mkdir -p /etc/systemd/resolved.conf.d/
+    sudo tee /etc/systemd/resolved.conf.d/disable-stub.conf > /dev/null << 'EOF'
+[Resolve]
+DNSStubListener=no
+EOF
+    sudo ln -sf /run/systemd/resolve/resolv.conf /etc/resolv.conf
+    sudo systemctl restart systemd-resolved
+    log "systemd-resolved configured successfully"
+else
+    log "systemd-resolved not active, skipping configuration"
+fi
+
 # Configure Xfce keyboard layout to German
 log "Configuring Xfce keyboard layout to German..."
 if command -v xfconf-query &> /dev/null; then
