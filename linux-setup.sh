@@ -45,10 +45,6 @@ is_kali_linux() {
 
 # Check if desktop environment is available
 has_desktop_environment() {
-    # Check for various desktop environment indicators
-    if [[ -n "$DISPLAY" ]] || [[ -n "$WAYLAND_DISPLAY" ]]; then
-        return 0
-    fi
     # Check for common desktop environment processes/services
     if systemctl is-active --quiet graphical-session.target 2>/dev/null || \
        pgrep -f "xfce4-session\|gnome-session\|kde-session\|lxsession" > /dev/null 2>&1 || \
