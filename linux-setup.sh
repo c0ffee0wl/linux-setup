@@ -86,6 +86,7 @@ sudo apt-get install -y \
     fd-find \
     moreutils \
     unp \
+    htop \
     exiftool \
     libpcap-dev \
     ufw \
