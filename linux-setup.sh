@@ -30,7 +30,7 @@ error() {
 
 # Check if running as root
 if [[ $EUID -eq 0 ]]; then
-    error "This script should not be run as root. Please run as a regular user with sudo privileges."
+    warn "This script should normally not be run as root. Please run as a regular user with sudo privileges."
 fi
 
 # Check if we're on a Debian-based system (hard requirement)
@@ -74,20 +74,20 @@ sudo apt-get install -y \
     moreutils \
     unp \
     exiftool \
-    python3-dev \
-    python3-pip \
-    python3-venv \
     fonts-firacode \
     terminator \
     libpcap-dev \
     meld \
+    ufw \
+    python3-dev \
+    python3-pip \
+    python3-venv \
     golang \
     rustc \
     cargo \
     nodejs \
     npm \
-    zsh \
-    ufw
+    zsh
 
 # Install Kali-specific package - only install on Kali Linux
 if is_kali_linux; then
