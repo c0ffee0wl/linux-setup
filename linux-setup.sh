@@ -99,7 +99,8 @@ fi
 # Install pipx (Python application installer)
 log "Installing pipx..."
 if ! command -v pipx &> /dev/null; then
-    python3 -m pip install --user pipx
+    #python3 -m pip install --user pipx
+    sudo apt-get install -y pipx
 else
     log "pipx is already installed"
 fi
