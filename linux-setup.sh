@@ -167,8 +167,7 @@ if ! command -v docker &> /dev/null; then
     sudo chmod a+r /etc/apt/keyrings/docker.asc
 
     # Add the repository to Apt sources
-    DOCKER_CODENAME=$(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
-    [[ "$DOCKER_CODENAME" == *"kali"* ]] && DOCKER_CODENAME="bookworm"
+    DOCKER_CODENAME="bookworm"
     echo \
       "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian $DOCKER_CODENAME stable" | \
       sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
