@@ -108,7 +108,8 @@ if has_desktop_environment; then
         gedit-plugins \
         fonts-firacode \
         terminator \
-        meld
+        meld \
+        xsel
         
     # Configure GTK terminal padding
     log "Configuring GTK terminal padding..."
@@ -632,6 +633,8 @@ alias polster='bwrap --die-with-parent --new-session --tmpfs /tmp --ro-bind /usr
 
 alias upgrade-all='sudo apt-get update && sudo apt-get dist-upgrade; pipx upgrade-all; uv tool upgrade --all'
 alias fd='fdfind'
+alias pbcopy='xsel --clipboard --input'
+alias pbpaste='xsel --clipboard --output'
 alias bat='batcat --theme=Coldark-Cold'
 alias cat='batcat --theme=Coldark-Cold --paging=never'
 
