@@ -55,7 +55,7 @@ has_desktop_environment() {
 }
 
 if ! is_kali_linux; then
-    warn "This script is designed for Kali Linux. Continuing anyway ..."
+    warn "This script is primarily designed for Kali Linux. Continuing anyway..."
 fi
 
 log "Starting Linux setup..."
@@ -793,6 +793,17 @@ EOF
     log "systemd-resolved configured successfully"
 else
     log "systemd-resolved not active, skipping configuration"
+fi
+
+# Disable avahi-daemon
+log "Disabling avahi-daemon..."
+if systemctl is-active --quiet avahi-daemon 2>/dev/null; then
+    log "avahi-daemon is active, disabling..."
+    sudo systemctl stop avahi-daemon
+    sudo systemctl disable avahi-daemon
+    log "avahi-daemon disabled successfully"
+else
+    log "avahi-daemon not active, skipping configuration"
 fi
 
 # Final cleanup
