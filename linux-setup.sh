@@ -77,6 +77,7 @@ sudo apt-get install -y \
     python3-dev \
     python3-pip \
     python3-venv \
+    fonts-firacode \
     terminator \
     libpcap-dev \
     meld \
