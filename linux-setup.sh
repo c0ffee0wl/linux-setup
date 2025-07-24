@@ -158,14 +158,19 @@ fi
 # Install Docker CE
 log "Installing Docker CE..."
 if ! command -v docker &> /dev/null; then
+    # Remove conflicting packages
+    for pkg in docker.io docker-doc docker-compose docker-compose-v2 podman-docker containerd runc; do sudo apt-get remove -y $pkg; done
+    
     # Add Docker's official GPG key
     sudo install -m 0755 -d /etc/apt/keyrings
     sudo curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
     sudo chmod a+r /etc/apt/keyrings/docker.asc
 
     # Add the repository to Apt sources
+    DOCKER_CODENAME=$(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
+    [[ "$DOCKER_CODENAME" == *"kali"* ]] && DOCKER_CODENAME="bookworm"
     echo \
-      "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian bookworm stable" | \
+      "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian $DOCKER_CODENAME stable" | \
       sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
     
     # Install Docker CE
@@ -799,8 +804,8 @@ fi
 log "Disabling avahi-daemon..."
 if systemctl is-active --quiet avahi-daemon 2>/dev/null; then
     log "avahi-daemon is active, disabling..."
-    sudo systemctl stop avahi-daemon || null
-    sudo systemctl disable avahi-daemon || null
+    sudo systemctl stop avahi-daemon || true
+    sudo systemctl disable avahi-daemon || true
     log "avahi-daemon disabled successfully"
 else
     log "avahi-daemon not active, skipping configuration"
