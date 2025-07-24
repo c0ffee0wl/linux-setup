@@ -799,8 +799,8 @@ fi
 log "Disabling avahi-daemon..."
 if systemctl is-active --quiet avahi-daemon 2>/dev/null; then
     log "avahi-daemon is active, disabling..."
-    sudo systemctl stop avahi-daemon
-    sudo systemctl disable avahi-daemon
+    sudo systemctl stop avahi-daemon || null
+    sudo systemctl disable avahi-daemon || null
     log "avahi-daemon disabled successfully"
 else
     log "avahi-daemon not active, skipping configuration"
