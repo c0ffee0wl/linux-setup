@@ -781,11 +781,6 @@ fi
 log "Enable ufw and ufw-docker with: "
 log "sudo ufw enable && sudu ufw-docker install && sudo systemctl restart ufw"
 
-# Final cleanup
-log "Performing final cleanup..."
-sudo apt-get autoremove -y
-sudo apt-get autoclean
-
 # Configure systemd-resolved to disable stub listener if installed
 log "Configuring systemd-resolved..."
 if systemctl is-active --quiet systemd-resolved 2>/dev/null; then
@@ -801,6 +796,11 @@ EOF
 else
     log "systemd-resolved not active, skipping configuration"
 fi
+
+# Final cleanup
+log "Performing final cleanup..."
+sudo apt-get autoremove -y
+sudo apt-get autoclean
 
 # Configure Xfce keyboard layout to German
 if has_desktop_environment; then
