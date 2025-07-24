@@ -83,6 +83,7 @@ sudo apt-get install -y \
     moreutils \
     unp \
     htop \
+    ncdu \
     lsof \
     exiftool \
     libpcap-dev \
@@ -814,6 +815,7 @@ fi
 log "Performing final cleanup..."
 sudo apt-get autoremove -y
 sudo apt-get clean
+go clean -cache -modcache
 
 # Configure Xfce keyboard layout to German
 if has_desktop_environment; then
