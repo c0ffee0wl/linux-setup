@@ -77,8 +77,6 @@ sudo apt-get install -y \
     python3-dev \
     python3-pip \
     python3-venv \
-    xfce4-settings \
-    xfce4-screensaver \
     terminator \
     libpcap-dev \
     meld \
@@ -87,14 +85,15 @@ sudo apt-get install -y \
     cargo \
     nodejs \
     npm \
+    zsh \
     ufw
 
-# Install massdns (Kali-specific package - only install on Kali Linux)
+# Install Kali-specific package - only install on Kali Linux
 if is_kali_linux; then
-    log "Installing massdns..."
-    sudo apt-get install -y massdns
+    log "Installing hacking tools..."
+    sudo apt-get install -y massdns mitmproxy || true
 else
-    warn "Skipping massdns installation - only available on Kali Linux"
+    warn "Skipping hacking tools installation - only available on Kali Linux"
 fi
 
 # Install pipx (Python application installer)
