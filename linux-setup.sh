@@ -139,9 +139,6 @@ if ! command -v docker &> /dev/null; then
     sudo apt-get update
     sudo apt-get install -y docker-ce
     
-    # Add current user to docker group
-    sudo usermod -aG docker $USER
-    
     # Enable and start Docker service
     sudo systemctl enable docker
     sudo systemctl start docker
@@ -592,6 +589,7 @@ alias up="$UPCOMMAND"
 alias polster='bwrap --die-with-parent --new-session --tmpfs /tmp --ro-bind /usr /usr --ro-bind /bin /bin --ro-bind /lib /lib --ro-bind /lib64 /lib64 --ro-bind /sbin /sbin --ro-bind /etc /etc --dev /dev --proc /proc --tmpfs /var --tmpfs /run --dir /run/user/$UID --tmpfs /usr/share --unshare-all --cap-drop ALL --clearenv'
 
 alias fd='fdfind'
+alias sudo='sudo '
 
 # Go PATH configuration
 export PATH=$HOME/go/bin:$PATH
