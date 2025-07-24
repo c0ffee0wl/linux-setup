@@ -596,7 +596,7 @@ EOF
 # Change default shell to zsh if not already zsh
 log "Checking and setting default shell to zsh..."
 if [[ "$SHELL" != "/usr/bin/zsh" && "$SHELL" != "/bin/zsh" ]]; then
-    chsh -s $(which zsh)
+    sudo chsh -s $(which zsh) $USER
     log "Default shell changed to zsh. You'll need to log out and back in for the change to take effect."
 else
     log "Shell is already set to zsh"
