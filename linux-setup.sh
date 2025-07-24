@@ -221,15 +221,6 @@ cat > ~/.config/xfce4/helpers.rc << 'EOF'
 TerminalEmulator=terminator
 EOF
 
-# Change default shell to zsh if not already zsh
-log "Checking and setting default shell to zsh..."
-if [[ "$SHELL" != "/usr/bin/zsh" && "$SHELL" != "/bin/zsh" ]]; then
-    chsh -s zsh
-    log "Default shell changed to zsh. You'll need to log out and back in for the change to take effect."
-else
-    log "Shell is already set to zsh"
-fi
-
 # Configure zsh with Kali Linux default baseline plus enhancements
 log "Configuring zsh..."
 cat > ~/.zshrc << 'EOF'
@@ -601,6 +592,15 @@ export PATH=$HOME/.cargo/bin:$PATH
 # Python uv and local packages PATH configuration
 export PATH=$HOME/.local/bin:$PATH
 EOF
+
+# Change default shell to zsh if not already zsh
+log "Checking and setting default shell to zsh..."
+if [[ "$SHELL" != "/usr/bin/zsh" && "$SHELL" != "/bin/zsh" ]]; then
+    chsh -s $(which zsh)
+    log "Default shell changed to zsh. You'll need to log out and back in for the change to take effect."
+else
+    log "Shell is already set to zsh"
+fi
 
 # Configure Terminator
 log "Configuring Terminator..."
