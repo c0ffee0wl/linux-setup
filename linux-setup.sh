@@ -540,6 +540,8 @@ fi
 # Linux Setup Script Custom Enhancements
 # ==========================================
 
+unset ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE
+
 # Enhanced tab completion
 setopt complete_in_word       # cd /ho/ka/Dow<TAB> expands to /home/kali/Downloads
 
@@ -823,7 +825,7 @@ fi
 log "Performing final cleanup..."
 sudo apt-get autoremove -y
 sudo apt-get clean
-go clean -cache -modcache
+go clean -cache -modcache || true
 
 # Configure Xfce keyboard layout to German
 if has_desktop_environment; then
