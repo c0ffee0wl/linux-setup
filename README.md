@@ -1,5 +1,34 @@
 # Linux Setup Script
 
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+
+- [Overview](#overview)
+- [Requirements](#requirements)
+- [Installation](#installation)
+  - [Quick Start](#quick-start)
+  - [What the script does:](#what-the-script-does)
+- [Post-Installation](#post-installation)
+- [Configuration Files](#configuration-files)
+- [Security Considerations](#security-considerations)
+- [Compatibility](#compatibility)
+- [Features](#features)
+  - [Development Tools](#development-tools)
+  - [Containerization](#containerization)
+  - [Terminal & Shell](#terminal--shell)
+  - [Productivity Tools](#productivity-tools)
+  - [System Configuration](#system-configuration)
+  - [Kali Linux Specific (when detected)](#kali-linux-specific-when-detected)
+- [Troubleshooting](#troubleshooting)
+  - [Common Issues](#common-issues)
+  - [Debug Mode](#debug-mode)
+- [Customization](#customization)
+- [Contributing](#contributing)
+- [License](#license)
+- [Acknowledgments](#acknowledgments)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 A comprehensive automation script for setting up a fresh Debian/Kali Linux installation with development tools, terminal enhancements, and security-focused configurations.
 
 ## Overview
