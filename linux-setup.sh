@@ -631,7 +631,7 @@ zle -N zle-upify
 bindkey "${ZSH_UP_KEYBINDING:-^P}" zle-upify
 
 alias up="$UPCOMMAND"
-alias polster='bwrap --die-with-parent --new-session --tmpfs /tmp --ro-bind /usr /usr --ro-bind /bin /bin --ro-bind /lib /lib --ro-bind /lib64 /lib64 --ro-bind /sbin /sbin --ro-bind /etc /etc --dev /dev --proc /proc --tmpfs /var --tmpfs /run --dir /run/user/$UID --tmpfs /usr/share --unshare-all --cap-drop ALL --clearenv'
+alias polster='bwrap --die-with-parent --tmpfs /tmp --ro-bind /usr /usr --ro-bind /bin /bin --ro-bind /lib /lib --ro-bind /lib64 /lib64 --ro-bind /sbin /sbin --ro-bind /etc /etc --dev /dev --proc /proc --tmpfs /var --tmpfs /run --dir /run/user/$UID --tmpfs /usr/share --unshare-all --clearenv'
 
 alias upgrade-all='sudo apt-get update && sudo apt-get dist-upgrade; pipx upgrade-all; uv tool upgrade --all'
 alias fd='fdfind'

@@ -24,7 +24,6 @@
   - [Terminal & Shell](#terminal--shell)
   - [Productivity Tools](#productivity-tools)
   - [System Configuration](#system-configuration)
-  - [Kali Linux Specific (when detected)](#kali-linux-specific-when-detected)
 - [Tools Reference](#tools-reference)
   - [Core System Tools](#core-system-tools)
   - [Modern CLI Alternatives](#modern-cli-alternatives)
@@ -268,11 +267,6 @@ The script creates/modifies these configuration files:
 - **Keyboard**: German layout configuration
 - **Display**: Optimized for development workflow
 - **Security**: User-level execution (no root required)
-
-### Kali Linux Specific (when detected)
-- **DNS tools**: massdns for subdomain enumeration
-- **Security toolkit**: Project Discovery tools via pdtm
-- **Reconnaissance**: Complete pentesting tool installation
 
 ## Tools Reference
 
