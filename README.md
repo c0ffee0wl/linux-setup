@@ -8,9 +8,10 @@
 - [Installation](#installation)
   - [Quick Start](#quick-start)
   - [What the script does:](#what-the-script-does)
+  - [Intelligent Installation Strategy](#intelligent-installation-strategy)
 - [Post-Installation](#post-installation)
 - [Usage Examples](#usage-examples)
-  - [Basic Shell Operations Previewed in Ultimate Plumber](#basic-shell-operations-previewed-in-ultimate-plumber)
+  - [Shell Operations Previewed in Ultimate Plumber](#shell-operations-previewed-in-ultimate-plumber)
   - [ripgrep (rg) - Fast Recursive Search](#ripgrep-rg---fast-recursive-search)
   - [sd - Search & Displace (sed replacement)](#sd---search--displace-sed-replacement)
   - [fd - Fast File Finder](#fd---fast-file-finder)
@@ -67,11 +68,29 @@ cd linux-setup
 
 ### What the script does:
 1. **System verification**: Checks OS compatibility and user privileges
-2. **Package updates**: Updates system packages and repositories  
+2. **Package updates**: Updates system packages and repositories
 3. **Tool installation**: Installs all development and productivity tools
 4. **Configuration**: Sets up shell, terminal, and system preferences
 5. **Security setup**: Configures Docker and sandboxing tools
 6. **Cleanup**: Removes unnecessary packages and cleans package cache
+
+### Intelligent Installation Strategy
+
+The script uses adaptive installation methods to ensure you get modern versions of critical development tools:
+
+**Rust Installation:**
+- Checks repository version availability
+- If repository has Rust >= 1.85: Installs from apt repositories
+- If repository version < 1.85: Installs via [rustup](https://rustup.rs/) for the latest stable toolchain
+- Automatically configures PATH and environment for both methods
+
+**Node.js Installation:**
+- Checks repository version availability
+- If repository has Node.js >= 20: Installs from apt repositories
+- If repository version < 20: Installs Node.js 22 via [nvm](https://github.com/nvm-sh/nvm) (Node Version Manager)
+- Automatically configures shell integration for nvm when used
+
+This ensures you always get modern, compatible versions regardless of your distribution's package repository age.
 
 ## Post-Installation
 
@@ -89,7 +108,7 @@ After running the script:
 
 This section demonstrates practical usage of the installed tools with real-world examples.
 
-### Basic Shell Operations Previewed in Ultimate Plumber
+### Shell Operations Previewed in Ultimate Plumber
 
 Classic Unix command pipelines with `awk`, `cut`, and `sed`, previewed with [up - the Ultimate Plumber](https://github.com/akavel/up), safely [bubblewrapped](https://github.com/containers/bubblewrap) in a sandbox.
 
@@ -216,10 +235,31 @@ man combine
 ## Configuration Files
 
 The script creates/modifies these configuration files:
-- `~/.zshrc` - Enhanced Zsh configuration
+
+**Shell & Terminal:**
+- `~/.zshrc` - Enhanced Zsh configuration with custom aliases and integrations
 - `~/.config/terminator/config` - Terminator terminal settings
-- `~/.config/xfce4/helpers.rc` - Default application settings
-- Various Xfce power management settings
+- `~/.config/terminator/plugins/tab_numbers.py` - Tab numbers plugin for Terminator
+- `~/.config/gtk-3.0/gtk.css` - GTK terminal padding configuration (8px)
+
+**Desktop Environment (XFCE):**
+- `~/.config/xfce4/helpers.rc` - Default terminal application settings
+- `~/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-screensaver.xml` - Screensaver settings
+- `~/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-power-manager.xml` - Power management settings
+- `~/.config/xfce4/xfconf/xfce-perchannel-xml/keyboard-layout.xml` - Keyboard layout (German)
+
+**System Configuration:**
+- `/etc/systemd/resolved.conf.d/disable-stub.conf` - DNS stub listener configuration
+- `/etc/apt/sources.list.d/docker.list` - Docker CE repository
+- `/etc/apt/sources.list.d/vscode.sources` - Visual Studio Code repository
+
+**Runtime Environments (Conditional):**
+- `~/.cargo/env` - Rust/Cargo environment (if installed via rustup)
+- `~/.rustup/` - Rust toolchain directory (if installed via rustup)
+- `~/.nvm/` - Node Version Manager directory (if installed via nvm)
+
+**Development Tools:**
+- `~/.enhancd/` - Enhanced cd command directory navigation
 
 ## Security Considerations
 
@@ -242,16 +282,23 @@ The script creates/modifies these configuration files:
 ### Development Tools
 - **Build essentials**: gcc, make, build tools
 - **Languages**: Go, Rust/Cargo, Python 3 with pip
-- **Package managers**: uv (modern Python package installer)
+- **Adaptive installation**: Automatic selection of rustup (Rust >= 1.85) or nvm (Node >= 20) when repo versions are outdated
+- **Package managers**: uv (modern Python package installer), pipx for isolated Python applications
+- **Version managers**: rustup and nvm support for managing multiple toolchain versions
 
 ### Containerization
 - **Docker CE**: Latest Docker Community Edition
 - **User configuration**: Automatic docker group membership
 - **Service management**: Auto-start Docker daemon
+- **Firewall integration**: ufw-docker for firewall rule management
+- **DNS optimization**: systemd-resolved stub listener disabled for container networking
+- **Port conflict prevention**: avahi-daemon disabled to free port 5353
 
 ### Terminal & Shell
 - **Shell**: Zsh with enhanced configuration based on Kali defaults
 - **Terminal**: Terminator as default with custom configuration
+- **Terminator plugins**: Tab numbers plugin for improved navigation
+- **Terminal styling**: Custom GTK padding (8px) for better readability
 - **History**: Enhanced history management with HSTR integration
 - **Navigation**: enhancd for intelligent directory jumping
 - **Search tools**: ripgrep, fd-find, fzf for fast file operations
@@ -263,10 +310,14 @@ The script creates/modifies these configuration files:
 - **Security sandboxing**: bubblewrap for isolated command execution
 
 ### System Configuration
-- **Power management**: Disabled screensaver and power saving
-- **Keyboard**: German layout configuration
+- **Power management**: Disabled screensaver and power saving (XFCE)
+- **Keyboard**: German layout configuration (XFCE)
 - **Display**: Optimized for development workflow
 - **Security**: User-level execution (no root required)
+- **Terminal padding**: 8px GTK terminal padding for better readability
+- **DNS optimization**: systemd-resolved stub listener disabled for tool compatibility
+- **Network services**: avahi-daemon disabled to prevent port conflicts (5353)
+- **Terminator enhancements**: Tab numbers plugin for improved tab navigation
 
 ## Tools Reference
 
