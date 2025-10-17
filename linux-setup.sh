@@ -45,13 +45,48 @@ is_kali_linux() {
 
 # Check if desktop environment is available
 has_desktop_environment() {
-    # Check for common desktop environment processes/services
-    if systemctl is-active --quiet graphical-session.target 2>/dev/null || \
-       pgrep -f "xfce4-session\|gnome-session\|kde-session\|lxsession" > /dev/null 2>&1 || \
-       command -v xfconf-query &> /dev/null; then
+    # Check for graphical systemd targets
+    if systemctl is-active --quiet graphical.target 2>/dev/null || \
+       systemctl is-active --quiet graphical-session.target 2>/dev/null; then
         return 0
     fi
+
+    # Check for desktop environment processes (expanded list for Gnome, KDE, XFCE, etc.)
+    if pgrep -f "xfce4-session\|gnome-session\|gnome-shell\|kde-session\|lxsession\|plasma\|cinnamon" > /dev/null 2>&1; then
+        return 0
+    fi
+
+    # Check for display server environment variables (X11 or Wayland)
+    if [ -n "$DISPLAY" ] || [ -n "$WAYLAND_DISPLAY" ]; then
+        return 0
+    fi
+
+    # Check for desktop environment configuration tools
+    if command -v xfconf-query &> /dev/null || \
+       command -v gsettings &> /dev/null; then
+        return 0
+    fi
+
     return 1
+}
+
+# Install Rust via rustup
+install_rust_via_rustup() {
+    log "Installing Rust via rustup (official Rust installer)..."
+
+    # Download and run rustup-init
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+
+    # Source cargo environment for this script
+    export CARGO_HOME="$HOME/.cargo"
+    export RUSTUP_HOME="$HOME/.rustup"
+    export PATH="$CARGO_HOME/bin:$PATH"
+
+    if [ -f "$HOME/.cargo/env" ]; then
+        source "$HOME/.cargo/env"
+    fi
+
+    log "Rust installed successfully via rustup"
 }
 
 if ! is_kali_linux; then
@@ -94,11 +129,83 @@ sudo apt-get install -y \
     python3-pip \
     python3-venv \
     golang \
-    rustc \
-    cargo \
-    nodejs \
-    npm \
     zsh
+
+# Install Rust - either from repo (if >= 1.85) or via rustup
+log "Checking Rust version in repositories..."
+REPO_RUST_VERSION=$(apt-cache policy rustc 2>/dev/null | grep -oP 'Candidate:\s*\K[0-9]+\.[0-9]+' | head -1)
+
+if [ -z "$REPO_RUST_VERSION" ]; then
+    REPO_RUST_VERSION="0.0"
+    warn "Could not determine repository Rust version"
+fi
+
+# Convert version to comparable number (e.g., "1.85" -> 185)
+REPO_RUST_VERSION_NUM=$(echo "$REPO_RUST_VERSION" | awk -F. '{print ($1 * 100) + $2}')
+MINIMUM_RUST_VERSION=185  # Rust 1.85 minimum for modern tools
+
+log "Repository has Rust version: $REPO_RUST_VERSION (numeric: $REPO_RUST_VERSION_NUM, minimum required: $MINIMUM_RUST_VERSION)"
+
+if ! command -v cargo &> /dev/null; then
+    # Rust not installed - choose installation method based on repo version
+    if [ "$REPO_RUST_VERSION_NUM" -ge "$MINIMUM_RUST_VERSION" ]; then
+        log "Installing Rust from repositories (version $REPO_RUST_VERSION)..."
+        sudo apt-get install -y cargo rustc
+    else
+        log "Repository version $REPO_RUST_VERSION is < 1.85, installing Rust via rustup..."
+        install_rust_via_rustup
+    fi
+else
+    log "Rust is already installed"
+fi
+
+# Install Node.js - either from repo (if >= 20) or via nvm
+log "Checking Node.js version in repositories..."
+REPO_NODE_VERSION=$(apt-cache policy nodejs 2>/dev/null | grep -oP 'Candidate:\s*\K[0-9]+' | head -1)
+
+if [ -z "$REPO_NODE_VERSION" ]; then
+    REPO_NODE_VERSION=0
+    warn "Could not determine repository Node.js version"
+fi
+
+MINIMUM_NODE_VERSION=20
+
+log "Repository has Node.js version: $REPO_NODE_VERSION (minimum required: $MINIMUM_NODE_VERSION)"
+
+if ! command -v node &> /dev/null; then
+    # Node.js not installed - choose installation method based on repo version
+    if [ "$REPO_NODE_VERSION" -ge "$MINIMUM_NODE_VERSION" ]; then
+        log "Installing Node.js from repositories (version $REPO_NODE_VERSION)..."
+        sudo apt-get install -y nodejs npm
+    else
+        log "Repository version $REPO_NODE_VERSION is < 20, installing Node 22 via nvm..."
+
+        # Install nvm
+        if [ ! -d "$HOME/.nvm" ]; then
+            log "Installing nvm..."
+            curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
+
+            # Source nvm immediately for this script
+            export NVM_DIR="$HOME/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+        else
+            log "nvm is already installed"
+            export NVM_DIR="$HOME/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+        fi
+
+        # Install Node 22 via nvm
+        log "Installing Node.js 22 via nvm..."
+        nvm install 22
+        nvm use 22
+        nvm alias default 22
+
+        # Set flag to indicate nvm was installed (for .zshrc update)
+        NVM_INSTALLED=true
+    fi
+else
+    log "Node.js is already installed"
+fi
 
 # Install GUI applications if desktop environment is available
 if has_desktop_environment; then
@@ -651,6 +758,18 @@ export PATH=$HOME/.cargo/bin:$PATH
 # Python uv and local packages PATH configuration
 export PATH=$HOME/.local/bin:$PATH
 EOF
+
+# Add nvm initialization to .zshrc if nvm was installed
+if [ "${NVM_INSTALLED:-false}" = "true" ]; then
+    log "Adding nvm initialization to .zshrc..."
+    cat >> ~/.zshrc << 'EOF'
+
+# nvm (Node Version Manager) configuration
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
+[ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
+EOF
+fi
 
 # Change default shell to zsh if not already zsh
 log "Checking and setting default shell to zsh..."
