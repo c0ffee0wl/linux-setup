@@ -654,7 +654,8 @@ unset ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE
 setopt complete_in_word       # cd /ho/ka/Dow<TAB> expands to /home/kali/Downloads
 
 # zoxide - smarter cd command
-if command -v zoxide &> /dev/null; then
+# Only initialize in interactive shells to avoid interfering with automation tools
+if command -v zoxide &> /dev/null && [[ -o interactive ]]; then
     eval "$(zoxide init zsh --cmd cd)"
 fi
 
