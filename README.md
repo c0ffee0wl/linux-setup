@@ -11,6 +11,8 @@
   - [Intelligent Installation Strategy](#intelligent-installation-strategy)
 - [Post-Installation](#post-installation)
 - [Usage Examples](#usage-examples)
+  - [Terminator Terminal](#terminator-terminal)
+    - [Terminator Keyboard Shortcuts](#terminator-keyboard-shortcuts)
   - [Shell Operations Previewed in Ultimate Plumber](#shell-operations-previewed-in-ultimate-plumber)
   - [ripgrep (rg) - Fast Recursive Search](#ripgrep-rg---fast-recursive-search)
   - [sd - Search & Displace (sed replacement)](#sd---search--displace-sed-replacement)
@@ -23,8 +25,8 @@
   - [fzf - Fuzzy Finder](#fzf---fuzzy-finder)
   - [ncdu - Disk Usage Analyzer](#ncdu---disk-usage-analyzer)
   - [unp - Universal Unpacker](#unp---universal-unpacker)
-- [Terminator Terminal](#terminator-terminal)
-  - [Terminator Keyboard Shortcuts](#terminator-keyboard-shortcuts)
+  - [httpie - User-Friendly HTTP Client](#httpie---user-friendly-http-client)
+  - [uv - Fast Python Package Manager](#uv---fast-python-package-manager)
 - [Configuration Files](#configuration-files)
 - [Security Considerations](#security-considerations)
 - [Compatibility](#compatibility)
@@ -116,6 +118,40 @@ After running the script:
 ## Usage Examples
 
 This section demonstrates practical usage of the installed tools with real-world examples.
+
+### Terminator Terminal
+
+The script configures Terminator as the default terminal emulator with custom keybindings and settings optimized for productivity.
+
+#### Terminator Keyboard Shortcuts
+
+**Tab Management:**
+- `Ctrl+T` - Open new tab
+- `Ctrl+Tab` - Next tab
+- `Ctrl+Shift+Tab` - Previous tab
+- `Ctrl+1` through `Ctrl+6` - Switch to tab 1-6 directly
+- `Ctrl+Shift+Page_Down` - Move current tab right
+- `Ctrl+Shift+Page_Up` - Move current tab left
+- `Alt+<Arrow>` - Switch to left/right/upper/lower terminal
+- `Ctrl+D` - Close terminal
+- `Super+N` - Insert tab number in terminal
+- `Super+R` - Rename/edit tab title
+- `Super+T` - Edit terminal title
+
+**Window Splitting:**
+- `Super+Y` - Split terminal horizontally
+- `Super+A` - Split terminal vertically
+- `Ctrl+Shift+Super+D` - Close window
+
+**Search & Navigation:**
+- `Ctrl+F` - Search in terminal output
+
+**Terminal Features:**
+- **Copy on selection** - Text is automatically copied when selected
+- **Infinite scrollback** - Never lose terminal history
+- **Tab numbers plugin** - Visual tab numbers for easy navigation
+
+> **Note**: `Super` key is typically the Windows/Command key on most keyboards.
 
 ### Shell Operations Previewed in Ultimate Plumber
 
@@ -412,39 +448,105 @@ tar -xzf file.tar.gz  # Traditional way
 unp file.tar.gz       # Simple way
 ```
 
-## Terminator Terminal
+### httpie - User-Friendly HTTP Client
 
-The script configures Terminator as the default terminal emulator with custom keybindings and settings optimized for productivity.
+`httpie` is a modern, user-friendly alternative to `curl` with intuitive syntax, JSON support, and colorized output:
 
-### Terminator Keyboard Shortcuts
+```bash
+# Simple GET request (auto-formats JSON response)
+http https://api.github.com/users/github
 
-**Tab Management:**
-- `Ctrl+T` - Open new tab
-- `Ctrl+Tab` - Next tab
-- `Ctrl+Shift+Tab` - Previous tab
-- `Ctrl+1` through `Ctrl+6` - Switch to tab 1-6 directly
-- `Ctrl+Shift+Page_Down` - Move current tab right
-- `Ctrl+Shift+Page_Up` - Move current tab left
-- `Super+N` - Insert tab number in terminal
-- `Super+R` - Rename/edit tab title
-- `Super+T` - Edit terminal title
+# GET request with query parameters
+http GET https://httpbin.org/get search==httpie lang==en
 
-**Window Splitting:**
-- `Super+Y` - Split terminal horizontally
-- `Super+A` - Split terminal vertically
-- `Ctrl+Shift+Super+D` - Close window
+# POST request with JSON data (JSON is the default)
+http POST https://httpbin.org/post name=Alice email=alice@example.com
 
-**Search & Navigation:**
-- `Ctrl+F` - Search in terminal output
+# POST with explicit JSON
+http POST https://api.example.com/users name=Bob age:=25 active:=true
 
-**Terminal Features:**
-- **Copy on selection** - Text is automatically copied when selected
-- **Infinite scrollback** - Never lose terminal history
-- **Fira Code font** - Programming font with ligatures (size 14)
-- **Gruvbox-inspired theme** - Dark background (#282828) with comfortable colors
-- **Tab numbers plugin** - Visual tab numbers for easy navigation
+# Custom headers
+http GET https://api.example.com/data Authorization:"Bearer TOKEN" User-Agent:CustomClient
 
-> **Note**: `Super` key is typically the Windows/Command key on most keyboards.
+# Download a file
+http --download https://example.com/file.zip
+
+# Basic authentication
+http -a username:password https://api.example.com/secure
+
+# Form data (instead of JSON)
+http --form POST https://httpbin.org/post name=Alice file@document.pdf
+
+# Upload JSON file
+http POST https://api.example.com/data < data.json
+
+# Pretty-print existing JSON file
+http --print=b --pretty=all --offline < messy.json
+
+# Follow redirects
+http --follow https://example.com/redirect
+
+# Show request and response headers
+http --verbose GET https://httpbin.org/headers
+
+# Session support (saves cookies and auth)
+http --session=./session.json https://api.example.com/login username=alice password=secret
+http --session=./session.json https://api.example.com/profile
+
+# Compare with curl:
+curl -X POST https://httpbin.org/post -H "Content-Type: application/json" -d '{"name":"Alice"}'
+http POST https://httpbin.org/post name=Alice  # Much simpler!
+```
+
+**Key features:**
+- JSON support by default (no need to specify Content-Type)
+- Expressive syntax: `key=value` for JSON, `key==value` for query params
+- Colorized and formatted output
+- Built-in session support
+- File upload support
+
+### uv - Fast Python Package Manager
+
+`uv` is an extremely fast Python package installer and resolver, written in Rust. It's **10-100x faster** than pip:
+
+```bash
+# Package installation (drop-in replacement for pip)
+uv pip install requests pandas numpy
+uv pip install -r requirements.txt
+uv pip install 'django>=4.0,<5.0'
+
+# Virtual environment management
+uv venv .venv
+source .venv/bin/activate
+uv pip install flask
+
+# Run Python tools without installing (like pipx)
+uv tool run ruff check .              # Run ruff linter
+uv tool run black .                   # Run black formatter
+uv tool run httpie httpbin.org/get    # Run httpie
+uv tool run name-that-hash            # Run hash identifier
+
+# Install tools globally
+uv tool install ruff
+uv tool install black
+
+# Install tools directly from git repositories
+uv tool install git+https://github.com/astral-sh/ruff
+
+# Install from specific branch or commit
+uv tool install git+https://github.com/user/tool@main
+# Other useful commands
+uv pip compile requirements.in -o requirements.txt  # Pin dependencies
+uv pip sync requirements.txt                         # Match requirements exactly
+uv pip list --outdated                               # Check for updates
+```
+
+**Key advantages:**
+- **10-100x faster** than pip for installation
+- Run tools without installation via `uv tool run`
+- Install tools directly from git repos with `git+https://...`
+- Better dependency resolution
+- Drop-in pip replacement (`alias pip='uv pip'`)
 
 ## Configuration Files
 
