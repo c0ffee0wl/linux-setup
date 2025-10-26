@@ -16,15 +16,18 @@
   - [sd - Search & Displace (sed replacement)](#sd---search--displace-sed-replacement)
   - [fd - Fast File Finder](#fd---fast-file-finder)
   - [moreutils - Advanced Unix Tools](#moreutils---advanced-unix-tools)
+  - [tldr - Simplified Command Examples](#tldr---simplified-command-examples)
+  - [bat - Syntax-Highlighted File Viewer](#bat---syntax-highlighted-file-viewer)
+  - [jq - JSON Processor](#jq---json-processor)
+  - [hstr - Enhanced History Search](#hstr---enhanced-history-search)
+  - [fzf - Fuzzy Finder](#fzf---fuzzy-finder)
+  - [ncdu - Disk Usage Analyzer](#ncdu---disk-usage-analyzer)
+  - [unp - Universal Unpacker](#unp---universal-unpacker)
+- [Terminator Terminal](#terminator-terminal)
+  - [Terminator Keyboard Shortcuts](#terminator-keyboard-shortcuts)
 - [Configuration Files](#configuration-files)
 - [Security Considerations](#security-considerations)
 - [Compatibility](#compatibility)
-- [Features](#features)
-  - [Development Tools](#development-tools)
-  - [Containerization](#containerization)
-  - [Terminal & Shell](#terminal--shell)
-  - [Productivity Tools](#productivity-tools)
-  - [System Configuration](#system-configuration)
 - [Tools Reference](#tools-reference)
   - [Core System Tools](#core-system-tools)
   - [Modern CLI Alternatives](#modern-cli-alternatives)
@@ -34,6 +37,12 @@
   - [Containerization & Security](#containerization--security)
   - [GUI Applications (Only Installed When GUI Detected)](#gui-applications-only-installed-when-gui-detected)
   - [Kali Linux Specific Tools (Only Installed on Kali)](#kali-linux-specific-tools-only-installed-on-kali)
+- [Features](#features)
+  - [Development Tools](#development-tools)
+  - [Containerization](#containerization)
+  - [Terminal & Shell](#terminal--shell)
+  - [Productivity Tools](#productivity-tools)
+  - [System Configuration](#system-configuration)
 - [Troubleshooting](#troubleshooting)
   - [Common Issues](#common-issues)
   - [Debug Mode](#debug-mode)
@@ -232,6 +241,211 @@ man sponge
 man combine
 ```
 
+### tldr - Simplified Command Examples
+
+`tldr` provides simple, practical examples for command-line tools (community-driven alternative to traditional man pages):
+
+```bash
+# Get quick examples for a command
+tldr tar
+
+# Learn how to use rsync
+tldr rsync
+
+# See common git commands
+tldr git
+
+# Update tldr database
+tldr --update
+
+# Search for commands
+tldr --list | grep network
+```
+
+### bat - Syntax-Highlighted File Viewer
+
+`bat` is a `cat` clone with syntax highlighting and Git integration:
+
+```bash
+# View a file with syntax highlighting (batcat is aliased to cat)
+bat script.py
+
+# View with line numbers
+bat -n config.json
+
+# Show non-printable characters
+bat -A file.txt
+
+# View multiple files
+bat src/*.rs
+
+# Page through long files automatically
+bat large-log.txt
+
+# Compare with cat (plain output)
+batcat --paging=never file.py
+```
+
+> **Note**: The script aliases `cat` to `batcat --theme=Coldark-Cold --paging=never` for everyday use.
+
+### jq - JSON Processor
+
+`jq` is a lightweight command-line JSON processor:
+
+```bash
+# Pretty-print JSON
+echo '{"name":"Alice","age":30}' | jq '.'
+
+# Extract a specific field
+curl -s https://api.github.com/users/github | jq '.name'
+
+# Filter array elements
+echo '[{"name":"Alice","age":30},{"name":"Bob","age":25}]' | jq '.[] | select(.age > 26)'
+
+# Get all keys from an object
+echo '{"a":1,"b":2,"c":3}' | jq 'keys'
+
+# Transform data
+echo '{"first":"John","last":"Doe"}' | jq '{fullname: "\(.first) \(.last)"}'
+
+# Work with files
+jq '.users[].email' data.json
+
+# Combine with other tools
+cat package.json | jq '.dependencies' | grep -i react
+```
+
+### hstr - Enhanced History Search
+
+`hstr` provides better command history navigation (configured with `Ctrl+R`):
+
+```bash
+# Press Ctrl+R to launch interactive history search
+# Type to filter commands, use arrows to navigate
+
+# Or use the hh alias
+hh
+
+# Search for specific pattern
+hstr docker
+
+# Configuration in .zshrc provides:
+# - Ctrl+R: Interactive history search with filtering
+# - Visual highlighting of search results
+# - Better than default Ctrl+R search
+```
+
+### fzf - Fuzzy Finder
+
+`fzf` is a general-purpose command-line fuzzy finder:
+
+```bash
+# Search files in current directory
+fzf
+
+# Preview files while searching
+fzf --preview 'bat --color=always {}'
+
+# Search command history
+history | fzf
+
+# Fuzzy find and open in editor
+vim $(fzf)
+
+# Search running processes
+ps aux | fzf
+
+# Change directory with preview (integrated via enhancd)
+cd **<TAB>  # Tab completion triggers fzf with directory preview
+
+# Search and kill process
+kill -9 $(ps aux | fzf | awk '{print $2}')
+
+# Multi-select files (Tab to select, Enter to confirm)
+rm $(fzf --multi)
+```
+
+> **Note**: `fzf` is integrated with the enhanced `cd` command via `enhancd` for smart directory navigation.
+
+### ncdu - Disk Usage Analyzer
+
+`ncdu` provides an interactive disk usage analyzer:
+
+```bash
+# Analyze current directory
+ncdu
+
+# Analyze specific directory
+ncdu /var
+
+# Analyze with progress indicator
+ncdu --color dark /home
+
+# Export results to file
+ncdu -o diskusage.json
+
+# Navigate with arrow keys:
+#   Up/Down: Navigate items
+#   Right/Enter: Open directory
+#   Left: Go to parent directory
+#   d: Delete selected file/directory
+#   g: Show percentage and/or graph
+#   q: Quit
+```
+
+### unp - Universal Unpacker
+
+`unp` automatically detects and extracts various archive formats:
+
+```bash
+# Extract any archive type
+unp archive.zip
+unp tarball.tar.gz
+unp file.rar
+unp data.7z
+
+# Supported formats: zip, tar, tar.gz, tar.bz2, tar.xz, rar, 7z, deb, rpm, and more
+
+# No need to remember tar flags!
+# Compare:
+tar -xzf file.tar.gz  # Traditional way
+unp file.tar.gz       # Simple way
+```
+
+## Terminator Terminal
+
+The script configures Terminator as the default terminal emulator with custom keybindings and settings optimized for productivity.
+
+### Terminator Keyboard Shortcuts
+
+**Tab Management:**
+- `Ctrl+T` - Open new tab
+- `Ctrl+Tab` - Next tab
+- `Ctrl+Shift+Tab` - Previous tab
+- `Ctrl+1` through `Ctrl+6` - Switch to tab 1-6 directly
+- `Ctrl+Shift+Page_Down` - Move current tab right
+- `Ctrl+Shift+Page_Up` - Move current tab left
+- `Super+N` - Insert tab number in terminal
+- `Super+R` - Rename/edit tab title
+- `Super+T` - Edit terminal title
+
+**Window Splitting:**
+- `Super+Y` - Split terminal horizontally
+- `Super+A` - Split terminal vertically
+- `Ctrl+Shift+Super+D` - Close window
+
+**Search & Navigation:**
+- `Ctrl+F` - Search in terminal output
+
+**Terminal Features:**
+- **Copy on selection** - Text is automatically copied when selected
+- **Infinite scrollback** - Never lose terminal history
+- **Fira Code font** - Programming font with ligatures (size 14)
+- **Gruvbox-inspired theme** - Dark background (#282828) with comfortable colors
+- **Tab numbers plugin** - Visual tab numbers for easy navigation
+
+> **Note**: `Super` key is typically the Windows/Command key on most keyboards.
+
 ## Configuration Files
 
 The script creates/modifies these configuration files:
@@ -277,6 +491,99 @@ The script creates/modifies these configuration files:
 | Ubuntu      | ✅ Compatible | Pentesting tools skipped |
 | Other Debian-based | ⚠️ May work | Limited testing |
 
+## Tools Reference
+
+This section provides a comprehensive reference of all tools installed by the script, including links to their documentation and availability information.
+
+### Core System Tools
+
+| Tool | Homepage | Documentation |
+|------|----------|---------------|
+| **build-essential** | [Debian Package](https://packages.debian.org/bookworm/build-essential) | [man pages](https://manpages.debian.org/) |
+| **curl** | [curl.se](https://curl.se/) | [Documentation](https://curl.se/docs/) |
+| **wget** | [GNU Wget](https://www.gnu.org/software/wget/) | [Manual](https://www.gnu.org/software/wget/manual/) |
+| **git** | [git-scm.com](https://git-scm.com/) | [Documentation](https://git-scm.com/doc) |
+| **htop** | [htop.dev](https://htop.dev/) | [man page](https://www.man7.org/linux/man-pages/man1/htop.1.html) |
+| **lsof** | [lsof](https://github.com/lsof-org/lsof) | [man page](https://man7.org/linux/man-pages/man8/lsof.8.html) |
+| **ncdu** | [ncdu](https://dev.yorhel.nl/ncdu) | [man page](https://dev.yorhel.nl/ncdu/man) |
+| **tree** | [tree](http://mama.indstate.edu/users/ice/tree/) | [man page](https://linux.die.net/man/1/tree) |
+| **unp** | [unp](https://github.com/mitsuhiko/unp) | [GitHub](https://github.com/mitsuhiko/unp) |
+| **exiftool** | [exiftool.org](https://exiftool.org/) | [Documentation](https://exiftool.org/exiftool_pod.html) |
+| **ufw** | [UFW](https://launchpad.net/ufw) | [man page](https://manpages.ubuntu.com/manpages/focal/man8/ufw.8.html) |
+
+### Modern CLI Alternatives
+
+| Tool | Homepage | Documentation |
+|------|----------|---------------|
+| **ripgrep (rg)** | [GitHub](https://github.com/BurntSushi/ripgrep) | [User Guide](https://github.com/BurntSushi/ripgrep/blob/master/GUIDE.md) |
+| **fd (fd-find)** | [GitHub](https://github.com/sharkdp/fd) | [README](https://github.com/sharkdp/fd#how-to-use) |
+| **sd** | [GitHub](https://github.com/chmln/sd) | [README](https://github.com/chmln/sd#quick-examples) |
+| **bat** | [GitHub](https://github.com/sharkdp/bat) | [README](https://github.com/sharkdp/bat#usage) |
+| **fzf** | [GitHub](https://github.com/junegunn/fzf) | [README](https://github.com/junegunn/fzf#usage) |
+| **jq** | [jqlang.github.io](https://jqlang.github.io/jq/) | [Manual](https://jqlang.github.io/jq/manual/) |
+| **moreutils** | [joeyh.name](https://joeyh.name/code/moreutils/) | [man pages](https://linux.die.net/man/1/moreutils) |
+| **httpie** | [httpie.io](https://httpie.io/) | [Documentation](https://httpie.io/docs/cli) |
+| **name-that-hash** | [GitHub](https://github.com/HashPals/Name-That-Hash) | [README](https://github.com/HashPals/Name-That-Hash#usage) |
+| **tldr** | [GitHub](https://github.com/tldr-pages/tldr) | [Documentation](https://github.com/tldr-pages/tldr#how-do-i-use-it) |
+
+### Shell & Terminal
+
+| Tool | Homepage | Documentation |
+|------|----------|---------------|
+| **zsh** | [zsh.org](https://www.zsh.org/) | [Documentation](https://zsh.sourceforge.io/Doc/) |
+| **hstr** | [GitHub](https://github.com/dvorka/hstr) | [README](https://github.com/dvorka/hstr#usage) |
+| **enhancd** | [GitHub](https://github.com/babarot/enhancd) | [README](https://github.com/babarot/enhancd#features) |
+| **up** | [GitHub](https://github.com/akavel/up) | [README](https://github.com/akavel/up#usage) |
+| **terminator** | [terminator-gtk3](https://gnome-terminator.org/) | [Documentation](https://gnome-terminator.readthedocs.io/) |
+
+### Programming Languages & Runtimes
+
+| Tool | Homepage | Documentation |
+|------|----------|---------------|
+| **Python 3** | [python.org](https://www.python.org/) | [Documentation](https://docs.python.org/3/) |
+| **Go (golang)** | [go.dev](https://go.dev/) | [Documentation](https://go.dev/doc/) |
+| **Rust (rustc)** | [rust-lang.org](https://www.rust-lang.org/) | [Documentation](https://doc.rust-lang.org/) |
+| **Cargo** | [doc.rust-lang.org](https://doc.rust-lang.org/cargo/) | [Book](https://doc.rust-lang.org/cargo/index.html) |
+| **Node.js** | [nodejs.org](https://nodejs.org/) | [Documentation](https://nodejs.org/docs/latest/api/) |
+| **npm** | [npmjs.com](https://www.npmjs.com/) | [Documentation](https://docs.npmjs.com/) |
+
+### Python Package Managers & Tools
+
+| Tool | Homepage | Documentation |
+|------|----------|---------------|
+| **pipx** | [GitHub](https://github.com/pypa/pipx) | [Documentation](https://pipx.pypa.io/stable/) |
+| **uv** | [GitHub](https://github.com/astral-sh/uv) | [Documentation](https://docs.astral.sh/uv/) |
+
+### Containerization & Security
+
+| Tool | Homepage | Documentation |
+|------|----------|---------------|
+| **Docker CE** | [docker.com](https://www.docker.com/) | [Documentation](https://docs.docker.com/) |
+| **ufw-docker** | [GitHub](https://github.com/chaifeng/ufw-docker) | [README](https://github.com/chaifeng/ufw-docker#ufw-docker) |
+| **bubblewrap** | [GitHub](https://github.com/containers/bubblewrap) | [man page](https://github.com/containers/bubblewrap#bubblewrap) |
+
+### GUI Applications (Only Installed When GUI Detected)
+
+| Tool | Homepage | Documentation |
+|------|----------|---------------|
+| **gedit** | [GNOME](https://wiki.gnome.org/Apps/Gedit) | [Help](https://help.gnome.org/users/gedit/stable/) |
+| **meld** | [meldmerge.org](https://meldmerge.org/) | [Help](https://meldmerge.org/) |
+| **Visual Studio Code** | [code.visualstudio.com](https://code.visualstudio.com/) | [Docs](https://code.visualstudio.com/docs) |
+| **xsel** | [xsel](http://www.vergenet.net/~conrad/software/xsel/) | [man page](https://linux.die.net/man/1/xsel) |
+| **Fira Code Font** | [GitHub](https://github.com/tonsky/FiraCode) | [README](https://github.com/tonsky/FiraCode#fira-code-monospaced-font-with-programming-ligatures) |
+
+### Kali Linux Specific Tools (Only Installed on Kali)
+
+| Tool | Homepage | Documentation |
+|------|----------|---------------|
+| **massdns** | [GitHub](https://github.com/blechschmidt/massdns) | [README](https://github.com/blechschmidt/massdns#usage) |
+| **mitmproxy** | [mitmproxy.org](https://mitmproxy.org/) | [Documentation](https://docs.mitmproxy.org/stable/) |
+| **pdtm** | [GitHub](https://github.com/projectdiscovery/pdtm) | [README](https://github.com/projectdiscovery/pdtm#usage) |
+| **ProjectDiscovery Tools** | [projectdiscovery.io](https://projectdiscovery.io/) | [Documentation](https://docs.projectdiscovery.io/) |
+| **bbot** | [GitHub](https://github.com/blacklanternsecurity/bbot) | [Documentation](https://www.blacklanternsecurity.com/bbot/) |
+| **NetExec** | [GitHub](https://github.com/Pennyw0rth/NetExec) | [Wiki](https://github.com/Pennyw0rth/NetExec/wiki) |
+| **BloodHoundAnalyzer** | [GitHub](https://github.com/c0ffee0wl/BloodHoundAnalyzer) | [README](https://github.com/c0ffee0wl/BloodHoundAnalyzer) |
+
 ## Features
 
 ### Development Tools
@@ -318,98 +625,6 @@ The script creates/modifies these configuration files:
 - **DNS optimization**: systemd-resolved stub listener disabled for tool compatibility
 - **Network services**: avahi-daemon disabled to prevent port conflicts (5353)
 - **Terminator enhancements**: Tab numbers plugin for improved tab navigation
-
-## Tools Reference
-
-This section provides a comprehensive reference of all tools installed by the script, including links to their documentation and availability information.
-
-### Core System Tools
-
-| Tool | Homepage | Documentation |
-|------|----------|---------------|
-| **build-essential** | [Debian Package](https://packages.debian.org/bookworm/build-essential) | [man pages](https://manpages.debian.org/) |
-| **curl** | [curl.se](https://curl.se/) | [Documentation](https://curl.se/docs/) |
-| **wget** | [GNU Wget](https://www.gnu.org/software/wget/) | [Manual](https://www.gnu.org/software/wget/manual/) |
-| **git** | [git-scm.com](https://git-scm.com/) | [Documentation](https://git-scm.com/doc) |
-| **htop** | [htop.dev](https://htop.dev/) | [man page](https://www.man7.org/linux/man-pages/man1/htop.1.html) |
-| **lsof** | [lsof](https://github.com/lsof-org/lsof) | [man page](https://man7.org/linux/man-pages/man8/lsof.8.html) |
-| **ncdu** | [ncdu](https://dev.yorhel.nl/ncdu) | [man page](https://dev.yorhel.nl/ncdu/man) |
-| **tree** | [tree](http://mama.indstate.edu/users/ice/tree/) | [man page](https://linux.die.net/man/1/tree) |
-| **unp** | [unp](https://github.com/mitsuhiko/unp) | [GitHub](https://github.com/mitsuhiko/unp) |
-| **exiftool** | [exiftool.org](https://exiftool.org/) | [Documentation](https://exiftool.org/exiftool_pod.html) |
-| **ufw** | [UFW](https://launchpad.net/ufw) | [man page](https://manpages.ubuntu.com/manpages/focal/man8/ufw.8.html) |
-
-### Modern CLI Alternatives
-
-| Tool | Homepage | Documentation |
-|------|----------|---------------|
-| **ripgrep (rg)** | [GitHub](https://github.com/BurntSushi/ripgrep) | [User Guide](https://github.com/BurntSushi/ripgrep/blob/master/GUIDE.md) |
-| **fd (fd-find)** | [GitHub](https://github.com/sharkdp/fd) | [README](https://github.com/sharkdp/fd#how-to-use) |
-| **sd** | [GitHub](https://github.com/chmln/sd) | [README](https://github.com/chmln/sd#quick-examples) |
-| **bat** | [GitHub](https://github.com/sharkdp/bat) | [README](https://github.com/sharkdp/bat#usage) |
-| **fzf** | [GitHub](https://github.com/junegunn/fzf) | [README](https://github.com/junegunn/fzf#usage) |
-| **jq** | [jqlang.github.io](https://jqlang.github.io/jq/) | [Manual](https://jqlang.github.io/jq/manual/) |
-| **moreutils** | [joeyh.name](https://joeyh.name/code/moreutils/) | [man pages](https://linux.die.net/man/1/moreutils) |
-
-### Shell & Terminal
-
-| Tool | Homepage | Documentation |
-|------|----------|---------------|
-| **zsh** | [zsh.org](https://www.zsh.org/) | [Documentation](https://zsh.sourceforge.io/Doc/) |
-| **hstr** | [GitHub](https://github.com/dvorka/hstr) | [README](https://github.com/dvorka/hstr#usage) |
-| **enhancd** | [GitHub](https://github.com/babarot/enhancd) | [README](https://github.com/babarot/enhancd#features) |
-| **up** | [GitHub](https://github.com/akavel/up) | [README](https://github.com/akavel/up#usage) |
-| **terminator** | [terminator-gtk3](https://gnome-terminator.org/) | [Documentation](https://gnome-terminator.readthedocs.io/) |
-
-### Programming Languages & Runtimes
-
-| Tool | Homepage | Documentation |
-|------|----------|---------------|
-| **Python 3** | [python.org](https://www.python.org/) | [Documentation](https://docs.python.org/3/) |
-| **Go (golang)** | [go.dev](https://go.dev/) | [Documentation](https://go.dev/doc/) |
-| **Rust (rustc)** | [rust-lang.org](https://www.rust-lang.org/) | [Documentation](https://doc.rust-lang.org/) |
-| **Cargo** | [doc.rust-lang.org](https://doc.rust-lang.org/cargo/) | [Book](https://doc.rust-lang.org/cargo/index.html) |
-| **Node.js** | [nodejs.org](https://nodejs.org/) | [Documentation](https://nodejs.org/docs/latest/api/) |
-| **npm** | [npmjs.com](https://www.npmjs.com/) | [Documentation](https://docs.npmjs.com/) |
-
-### Python Package Managers & Tools
-
-| Tool | Homepage | Documentation |
-|------|----------|---------------|
-| **pipx** | [GitHub](https://github.com/pypa/pipx) | [Documentation](https://pipx.pypa.io/stable/) |
-| **uv** | [GitHub](https://github.com/astral-sh/uv) | [Documentation](https://docs.astral.sh/uv/) |
-| **httpie** | [httpie.io](https://httpie.io/) | [Documentation](https://httpie.io/docs/cli) |
-| **name-that-hash** | [GitHub](https://github.com/HashPals/Name-That-Hash) | [README](https://github.com/HashPals/Name-That-Hash#usage) |
-
-### Containerization & Security
-
-| Tool | Homepage | Documentation |
-|------|----------|---------------|
-| **Docker CE** | [docker.com](https://www.docker.com/) | [Documentation](https://docs.docker.com/) |
-| **ufw-docker** | [GitHub](https://github.com/chaifeng/ufw-docker) | [README](https://github.com/chaifeng/ufw-docker#ufw-docker) |
-| **bubblewrap** | [GitHub](https://github.com/containers/bubblewrap) | [man page](https://github.com/containers/bubblewrap#bubblewrap) |
-
-### GUI Applications (Only Installed When GUI Detected)
-
-| Tool | Homepage | Documentation |
-|------|----------|---------------|
-| **gedit** | [GNOME](https://wiki.gnome.org/Apps/Gedit) | [Help](https://help.gnome.org/users/gedit/stable/) |
-| **meld** | [meldmerge.org](https://meldmerge.org/) | [Help](https://meldmerge.org/) |
-| **Visual Studio Code** | [code.visualstudio.com](https://code.visualstudio.com/) | [Docs](https://code.visualstudio.com/docs) |
-| **xsel** | [xsel](http://www.vergenet.net/~conrad/software/xsel/) | [man page](https://linux.die.net/man/1/xsel) |
-| **Fira Code Font** | [GitHub](https://github.com/tonsky/FiraCode) | [README](https://github.com/tonsky/FiraCode#fira-code-monospaced-font-with-programming-ligatures) |
-
-### Kali Linux Specific Tools (Only Installed on Kali)
-
-| Tool | Homepage | Documentation |
-|------|----------|---------------|
-| **massdns** | [GitHub](https://github.com/blechschmidt/massdns) | [README](https://github.com/blechschmidt/massdns#usage) |
-| **mitmproxy** | [mitmproxy.org](https://mitmproxy.org/) | [Documentation](https://docs.mitmproxy.org/stable/) |
-| **pdtm** | [GitHub](https://github.com/projectdiscovery/pdtm) | [README](https://github.com/projectdiscovery/pdtm#usage) |
-| **ProjectDiscovery Tools** | [projectdiscovery.io](https://projectdiscovery.io/) | [Documentation](https://docs.projectdiscovery.io/) |
-| **bbot** | [GitHub](https://github.com/blacklanternsecurity/bbot) | [Documentation](https://www.blacklanternsecurity.com/bbot/) |
-| **NetExec** | [GitHub](https://github.com/Pennyw0rth/NetExec) | [Wiki](https://github.com/Pennyw0rth/NetExec/wiki) |
-| **BloodHoundAnalyzer** | [GitHub](https://github.com/c0ffee0wl/BloodHoundAnalyzer) | [README](https://github.com/c0ffee0wl/BloodHoundAnalyzer) |
 
 ## Troubleshooting
 

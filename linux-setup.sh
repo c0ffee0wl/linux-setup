@@ -262,6 +262,7 @@ log "Installing Python tools with uv..."
 if command -v uv &> /dev/null; then
     uv tool install httpie
     uv tool install name-that-hash
+    uv tool install tldr
 else
     warn "uv not available, skipping Python tools installation"
 fi
