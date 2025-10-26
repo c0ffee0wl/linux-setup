@@ -22,11 +22,11 @@
   - [bat - Syntax-Highlighted File Viewer](#bat---syntax-highlighted-file-viewer)
   - [jq - JSON Processor](#jq---json-processor)
   - [hstr - Enhanced History Search](#hstr---enhanced-history-search)
-  - [fzf - Fuzzy Finder](#fzf---fuzzy-finder)
-  - [ncdu - Disk Usage Analyzer](#ncdu---disk-usage-analyzer)
   - [unp - Universal Unpacker](#unp---universal-unpacker)
   - [httpie - User-Friendly HTTP Client](#httpie---user-friendly-http-client)
+  - [ncdu - Disk Usage Analyzer](#ncdu---disk-usage-analyzer)
   - [uv - Fast Python Package Manager](#uv---fast-python-package-manager)
+  - [fzf - Fuzzy Finder](#fzf---fuzzy-finder)
 - [Configuration Files](#configuration-files)
 - [Security Considerations](#security-considerations)
 - [Compatibility](#compatibility)
@@ -285,16 +285,10 @@ man combine
 # Get quick examples for a command
 tldr tar
 
-# Learn how to use rsync
-tldr rsync
-
-# See common git commands
-tldr git
-
 # Update tldr database
 tldr --update
 
-# Search for commands
+# Search for commands (for it to work requires previous --update)
 tldr --list | grep network
 ```
 
@@ -371,64 +365,6 @@ hstr docker
 # - Better than default Ctrl+R search
 ```
 
-### fzf - Fuzzy Finder
-
-`fzf` is a general-purpose command-line fuzzy finder:
-
-```bash
-# Search files in current directory
-fzf
-
-# Preview files while searching
-fzf --preview 'bat --color=always {}'
-
-# Search command history
-history | fzf
-
-# Fuzzy find and open in editor
-vim $(fzf)
-
-# Search running processes
-ps aux | fzf
-
-# Change directory with preview (integrated via enhancd)
-cd **<TAB>  # Tab completion triggers fzf with directory preview
-
-# Search and kill process
-kill -9 $(ps aux | fzf | awk '{print $2}')
-
-# Multi-select files (Tab to select, Enter to confirm)
-rm $(fzf --multi)
-```
-
-> **Note**: `fzf` is integrated with the enhanced `cd` command via `enhancd` for smart directory navigation.
-
-### ncdu - Disk Usage Analyzer
-
-`ncdu` provides an interactive disk usage analyzer:
-
-```bash
-# Analyze current directory
-ncdu
-
-# Analyze specific directory
-ncdu /var
-
-# Analyze with progress indicator
-ncdu --color dark /home
-
-# Export results to file
-ncdu -o diskusage.json
-
-# Navigate with arrow keys:
-#   Up/Down: Navigate items
-#   Right/Enter: Open directory
-#   Left: Go to parent directory
-#   d: Delete selected file/directory
-#   g: Show percentage and/or graph
-#   q: Quit
-```
-
 ### unp - Universal Unpacker
 
 `unp` automatically detects and extracts various archive formats:
@@ -441,11 +377,6 @@ unp file.rar
 unp data.7z
 
 # Supported formats: zip, tar, tar.gz, tar.bz2, tar.xz, rar, 7z, deb, rpm, and more
-
-# No need to remember tar flags!
-# Compare:
-tar -xzf file.tar.gz  # Traditional way
-unp file.tar.gz       # Simple way
 ```
 
 ### httpie - User-Friendly HTTP Client
@@ -492,18 +423,33 @@ http --verbose GET https://httpbin.org/headers
 # Session support (saves cookies and auth)
 http --session=./session.json https://api.example.com/login username=alice password=secret
 http --session=./session.json https://api.example.com/profile
-
-# Compare with curl:
-curl -X POST https://httpbin.org/post -H "Content-Type: application/json" -d '{"name":"Alice"}'
-http POST https://httpbin.org/post name=Alice  # Much simpler!
 ```
 
-**Key features:**
-- JSON support by default (no need to specify Content-Type)
-- Expressive syntax: `key=value` for JSON, `key==value` for query params
-- Colorized and formatted output
-- Built-in session support
-- File upload support
+### ncdu - Disk Usage Analyzer
+
+`ncdu` provides an interactive disk usage analyzer:
+
+```bash
+# Analyze current directory
+ncdu
+
+# Analyze specific directory
+ncdu /var
+
+# Analyze with progress indicator
+ncdu --color dark /home
+
+# Export results to file
+ncdu -o diskusage.json
+
+# Navigate with arrow keys:
+#   Up/Down: Navigate items
+#   Right/Enter: Open directory
+#   Left: Go to parent directory
+#   d: Delete selected file/directory
+#   g: Show percentage and/or graph
+#   q: Quit
+```
 
 ### uv - Fast Python Package Manager
 
@@ -513,7 +459,6 @@ http POST https://httpbin.org/post name=Alice  # Much simpler!
 # Package installation (drop-in replacement for pip)
 uv pip install requests pandas numpy
 uv pip install -r requirements.txt
-uv pip install 'django>=4.0,<5.0'
 
 # Virtual environment management
 uv venv .venv
@@ -528,25 +473,50 @@ uv tool run name-that-hash            # Run hash identifier
 
 # Install tools globally
 uv tool install ruff
-uv tool install black
 
 # Install tools directly from git repositories
 uv tool install git+https://github.com/astral-sh/ruff
 
 # Install from specific branch or commit
 uv tool install git+https://github.com/user/tool@main
+
 # Other useful commands
 uv pip compile requirements.in -o requirements.txt  # Pin dependencies
 uv pip sync requirements.txt                         # Match requirements exactly
 uv pip list --outdated                               # Check for updates
 ```
 
-**Key advantages:**
-- **10-100x faster** than pip for installation
-- Run tools without installation via `uv tool run`
-- Install tools directly from git repos with `git+https://...`
-- Better dependency resolution
-- Drop-in pip replacement (`alias pip='uv pip'`)
+### fzf - Fuzzy Finder
+
+`fzf` is a general-purpose command-line fuzzy finder:
+
+```bash
+# Search files in current directory
+fzf
+
+# Preview files while searching
+fzf --preview 'bat --color=always {}'
+
+# Search command history
+history | fzf
+
+# Fuzzy find and open in editor
+vim $(fzf)
+
+# Search running processes
+ps aux | fzf
+
+# Change directory with preview (integrated via enhancd)
+cd **<TAB>  # Tab completion triggers fzf with directory preview
+
+# Search and kill process
+kill -9 $(ps aux | fzf | awk '{print $2}')
+
+# Multi-select files (Tab to select, Enter to confirm)
+rm $(fzf --multi)
+```
+
+> **Note**: `fzf` is integrated with the enhanced `cd` command via `enhancd` for smart directory navigation.
 
 ## Configuration Files
 
