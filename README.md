@@ -27,6 +27,8 @@
   - [ncdu - Disk Usage Analyzer](#ncdu---disk-usage-analyzer)
   - [uv - Fast Python Package Manager](#uv---fast-python-package-manager)
   - [fzf - Fuzzy Finder](#fzf---fuzzy-finder)
+  - [zoxide - Smart Directory Navigation](#zoxide---smart-directory-navigation)
+  - [Shell Helper Functions](#shell-helper-functions)
 - [Configuration Files](#configuration-files)
 - [Security Considerations](#security-considerations)
 - [Compatibility](#compatibility)
@@ -469,7 +471,6 @@ uv pip install flask
 uv tool run ruff check .              # Run ruff linter
 uv tool run black .                   # Run black formatter
 uv tool run httpie httpbin.org/get    # Run httpie
-uv tool run name-that-hash            # Run hash identifier
 
 # Install tools globally
 uv tool install ruff
@@ -506,9 +507,6 @@ vim $(fzf)
 # Search running processes
 ps aux | fzf
 
-# Change directory with preview (integrated via enhancd)
-cd **<TAB>  # Tab completion triggers fzf with directory preview
-
 # Search and kill process
 kill -9 $(ps aux | fzf | awk '{print $2}')
 
@@ -516,7 +514,43 @@ kill -9 $(ps aux | fzf | awk '{print $2}')
 rm $(fzf --multi)
 ```
 
-> **Note**: `fzf` is integrated with the enhanced `cd` command via `enhancd` for smart directory navigation.
+> **Note**: The `cd` command is replaced by `zoxide` for smart frecency-based directory navigation.
+
+### zoxide - Smart Directory Navigation
+
+`zoxide` is a smarter cd command that tracks your most frequently and recently used directories:
+
+```bash
+# After using zoxide for a while, jump to directories by partial name
+cd doc      # cd to ~/Documents if that's your highest ranking match
+cd ~/pro    # cd to ~/projects
+cd foo bar  # cd into highest ranked directory matching foo and bar
+cd ..       # Works like normal cd
+
+# View zoxide's database
+zoxide query --list
+
+# Remove a directory from the database
+zoxide remove /path/to/dir
+```
+
+### Shell Helper Functions
+
+The script provides convenient shell functions for common directory operations:
+
+```bash
+# mkcd - Create directory and cd into it
+mkcd ~/new/project/path
+# Equivalent to: mkdir -p ~/new/project/path && cd ~/new/project/path
+
+# tempe - Create temporary directory and cd into it
+tempe
+# Creates a temp dir with 700 permissions and navigates to it
+
+# tempe with subdirectory
+tempe mywork
+# Creates temp dir, then creates and enters 'mywork' subdirectory
+```
 
 ## Configuration Files
 
@@ -543,9 +577,6 @@ The script creates/modifies these configuration files:
 - `~/.cargo/env` - Rust/Cargo environment (if installed via rustup)
 - `~/.rustup/` - Rust toolchain directory (if installed via rustup)
 - `~/.nvm/` - Node Version Manager directory (if installed via nvm)
-
-**Development Tools:**
-- `~/.enhancd/` - Enhanced cd command directory navigation
 
 ## Security Considerations
 
@@ -604,7 +635,7 @@ This section provides a comprehensive reference of all tools installed by the sc
 |------|----------|---------------|
 | **zsh** | [zsh.org](https://www.zsh.org/) | [Documentation](https://zsh.sourceforge.io/Doc/) |
 | **hstr** | [GitHub](https://github.com/dvorka/hstr) | [README](https://github.com/dvorka/hstr#usage) |
-| **enhancd** | [GitHub](https://github.com/babarot/enhancd) | [README](https://github.com/babarot/enhancd#features) |
+| **zoxide** | [GitHub](https://github.com/ajeetdsouza/zoxide) | [README](https://github.com/ajeetdsouza/zoxide#readme) |
 | **up** | [GitHub](https://github.com/akavel/up) | [README](https://github.com/akavel/up#usage) |
 | **terminator** | [terminator-gtk3](https://gnome-terminator.org/) | [Documentation](https://gnome-terminator.readthedocs.io/) |
 
@@ -679,7 +710,7 @@ This section provides a comprehensive reference of all tools installed by the sc
 - **Terminator plugins**: Tab numbers plugin for improved navigation
 - **Terminal styling**: Custom GTK padding (8px) for better readability
 - **History**: Enhanced history management with HSTR integration
-- **Navigation**: enhancd for intelligent directory jumping
+- **Navigation**: zoxide for frecency-based directory jumping
 - **Search tools**: ripgrep, fd-find, fzf for fast file operations
 
 ### Productivity Tools

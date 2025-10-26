@@ -335,14 +335,6 @@ else
     log "No desktop environment detected - skipping Visual Studio Code installation"
 fi
 
-# Install enhancd (enhanced cd command)
-log "Installing enhancd..."
-if [[ ! -d ~/.enhancd ]]; then
-    git clone --depth=1 https://github.com/babarot/enhancd.git ~/.enhancd
-else
-    log "enhancd is already installed"
-fi
-
 # Install up tool
 log "Installing up tool..."
 if ! command -v up &> /dev/null; then
@@ -351,6 +343,14 @@ if ! command -v up &> /dev/null; then
     sudo cp $(which up) /usr/local/bin/ 2>/dev/null || sudo cp $HOME/go/bin/up /usr/local/bin/
 else
     log "up tool is already installed"
+fi
+
+# Install zoxide (smarter cd)
+log "Installing zoxide..."
+if ! command -v zoxide &> /dev/null; then
+    cargo install zoxide --locked
+else
+    log "zoxide is already installed"
 fi
 
 # Disable screensaver and power management
@@ -653,13 +653,9 @@ unset ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE
 # Enhanced tab completion
 setopt complete_in_word       # cd /ho/ka/Dow<TAB> expands to /home/kali/Downloads
 
-# https://github.com/babarot/enhancd
-if [[ -f ~/.enhancd/init.sh ]]; then
-    source ~/.enhancd/init.sh
-    export ENHANCD_FILTER="fzf --height 40% --reverse --ansi --preview 'tree -L 1 {}'"
-    export ENHANCD_ENABLE_HOME="false"
-    export ENHANCD_ARG_DOUBLE_DOT="dd"
-    export ENHANCD_ARG_HYPHEN="hyp"
+# zoxide - smarter cd command
+if command -v zoxide &> /dev/null; then
+    eval "$(zoxide init zsh --cmd cd)"
 fi
 
 # Enhanced history settings
@@ -749,6 +745,23 @@ alias bat='batcat --theme=Coldark-Cold'
 alias cat='batcat --theme=Coldark-Cold --paging=never'
 
 alias sudo='sudo '
+alias sudp='sudo '
+
+# Directory creation helpers
+mkcd() {
+  mkdir -p -- "$1" &&
+  \cd -- "$1"
+}
+
+tempe() {
+  \cd "$(mktemp -d)"
+  chmod -R 0700 .
+  if [[ $# -eq 1 ]]; then
+    \mkdir -p "$1"
+    \cd "$1"
+    chmod -R 0700 .
+  fi
+}
 
 # Go PATH configuration
 export PATH=$HOME/go/bin:$PATH
