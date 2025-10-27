@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-VERSION="1.0"
+VERSION="1.1"
 
 # Colors for output
 RED='\033[0;31m'
@@ -26,6 +26,39 @@ warn() {
 error() {
     echo -e "${RED}[ERROR] $1${NC}"
     exit 1
+}
+
+# Backup a file with timestamp
+backup_file() {
+    local file_path="$1"
+    if [ -f "$file_path" ]; then
+        local backup_path="${file_path}.backup.$(date +'%Y-%m-%d_%H-%M-%S')"
+        cp "$file_path" "$backup_path"
+        log "Backed up to: $backup_path"
+    fi
+}
+
+# Prompt user with yes/no question
+# Usage: prompt_yes_no "Question?" "Y" (or "N" for default No)
+# Returns: 0 for yes, 1 for no
+prompt_yes_no() {
+    local prompt="$1"
+    local default="$2"
+    local response
+
+    if [[ "$default" == "Y" ]]; then
+        read -p "$prompt (Y/n): " response
+        response=${response:-Y}
+    else
+        read -p "$prompt (y/N): " response
+        response=${response:-N}
+    fi
+
+    if [[ "$response" =~ ^[Yy]$ ]]; then
+        return 0
+    else
+        return 1
+    fi
 }
 
 # Check if running as root
@@ -92,6 +125,42 @@ install_rust_via_rustup() {
 if ! is_kali_linux; then
     warn "This script is primarily designed for Kali Linux. Continuing anyway..."
 fi
+
+#############################################################################
+# PHASE 0: Self-Update
+#############################################################################
+
+log "Checking for script updates..."
+
+# Get the directory where this script is located
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
+if git rev-parse --git-dir > /dev/null 2>&1; then
+    log "Git repository detected, checking for updates..."
+
+    # Fetch latest changes
+    git fetch origin 2>/dev/null || true
+
+    # Count commits we don't have that remote has
+    BEHIND=$(git rev-list HEAD..@{u} 2>/dev/null | wc -l)
+
+    if [ "$BEHIND" -gt 0 ]; then
+        log "Updates found! Pulling latest changes..."
+        git pull --ff-only
+        log "Re-executing updated script..."
+        exec "$0" "$@"
+        exit 0
+    else
+        log "Script is up to date"
+    fi
+else
+    warn "Not running from a git repository. Self-update disabled."
+fi
+
+#############################################################################
+# PHASE 1: System Setup
+#############################################################################
 
 log "Starting Linux setup..."
 
@@ -383,6 +452,18 @@ fi
 
 # Configure zsh with Kali Linux default baseline plus enhancements
 log "Configuring zsh..."
+
+# Check if .zshrc exists and prompt for overwrite
+OVERWRITE_ZSHRC=true
+if [ -f ~/.zshrc ]; then
+    backup_file ~/.zshrc
+    if ! prompt_yes_no "Overwrite existing .zshrc (initially strongly recommended!)?" "Y"; then
+        OVERWRITE_ZSHRC=false
+        log "Keeping existing .zshrc"
+    fi
+fi
+
+if [ "$OVERWRITE_ZSHRC" = true ]; then
 cat > ~/.zshrc << 'EOF'
 # Default ~/.zshrc from Kali Linux
 # ~/.zshrc file for zsh interactive shells.
@@ -773,6 +854,7 @@ export PATH=$HOME/.cargo/bin:$PATH
 # Python uv and local packages PATH configuration
 export PATH=$HOME/.local/bin:$PATH
 EOF
+fi
 
 # Add nvm initialization to .zshrc if nvm was installed
 if [ "${NVM_INSTALLED:-false}" = "true" ]; then
@@ -787,10 +869,14 @@ EOF
 fi
 
 # Change default shell to zsh if not already zsh
-log "Checking and setting default shell to zsh..."
+log "Checking default shell..."
 if [[ "$SHELL" != "/usr/bin/zsh" && "$SHELL" != "/bin/zsh" ]]; then
-    sudo chsh -s $(which zsh) $USER
-    log "Default shell changed to zsh. You'll need to log out and back in for the change to take effect."
+    if prompt_yes_no "Change default shell to zsh?" "Y"; then
+        sudo chsh -s $(which zsh) $USER
+        log "Default shell changed to zsh. You'll need to log out and back in for the change to take effect."
+    else
+        log "Keeping current shell: $SHELL"
+    fi
 else
     log "Shell is already set to zsh"
 fi
@@ -799,6 +885,18 @@ fi
 if has_desktop_environment; then
     log "Configuring Terminator..."
     mkdir -p ~/.config/terminator
+
+    # Check if Terminator config exists and prompt for overwrite
+    OVERWRITE_TERMINATOR=true
+    if [ -f ~/.config/terminator/config ]; then
+        backup_file ~/.config/terminator/config
+        if ! prompt_yes_no "Overwrite existing Terminator config?" "N"; then
+            OVERWRITE_TERMINATOR=false
+            log "Keeping existing Terminator config"
+        fi
+    fi
+
+    if [ "$OVERWRITE_TERMINATOR" = true ]; then
 cat > ~/.config/terminator/config << 'EOF'
 [global_config]
   focus = mouse
@@ -852,6 +950,7 @@ cat > ~/.config/terminator/config << 'EOF'
       parent = window0
 [plugins]
 EOF
+    fi
 
     # Install Terminator tab numbers plugin
     log "Installing Terminator tab numbers plugin..."
@@ -887,6 +986,8 @@ if is_kali_linux; then
     log "Installing all Project Discovery tools..."
     if command -v pdtm &> /dev/null; then
         pdtm -install-all
+        log "Updating all Project Discovery tools..."
+        pdtm -update-all
     else
         warn "pdtm installation failed, skipping tool installation"
     fi
@@ -963,10 +1064,15 @@ go clean -cache -modcache || true
 
 # Configure Xfce keyboard layout to German
 if has_desktop_environment; then
-    log "Configuring Xfce keyboard layout to German..."
     if command -v xfconf-query &> /dev/null; then
-        xfconf-query -c keyboard-layout -p /Default/XkbDisable --create -t bool -s false
-        xfconf-query -c keyboard-layout -p /Default/XkbLayout --create -t string -s "de"
+        if prompt_yes_no "Configure German keyboard layout in XFCE?" "Y"; then
+            log "Configuring Xfce keyboard layout to German..."
+            xfconf-query -c keyboard-layout -p /Default/XkbDisable --create -t bool -s false
+            xfconf-query -c keyboard-layout -p /Default/XkbLayout --create -t string -s "de"
+            log "German keyboard layout configured"
+        else
+            log "Skipping keyboard layout configuration"
+        fi
     else
         warn "xfconf-query not available, skipping keyboard layout configuration"
     fi
