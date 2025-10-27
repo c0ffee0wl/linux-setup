@@ -1065,7 +1065,7 @@ go clean -cache -modcache || true
 # Configure Xfce keyboard layout to German
 if has_desktop_environment; then
     if command -v xfconf-query &> /dev/null; then
-        if prompt_yes_no "Configure German keyboard layout in XFCE?" "Y"; then
+        if prompt_yes_no "Configure German keyboard layout in XFCE?" "N"; then
             log "Configuring Xfce keyboard layout to German..."
             xfconf-query -c keyboard-layout -p /Default/XkbDisable --create -t bool -s false
             xfconf-query -c keyboard-layout -p /Default/XkbLayout --create -t string -s "de"
@@ -1087,3 +1087,16 @@ echo -e "${BLUE}===========================================${NC}"
 
 echo
 echo -e "${YELLOW}Please log out and log back in for all changes to take effect.${NC}"
+echo
+echo -e "${BLUE}===========================================${NC}"
+echo -e "${BLUE}  Self-Update Information${NC}"
+echo -e "${BLUE}===========================================${NC}"
+echo
+echo -e "This script has a ${GREEN}built-in self-update mechanism${NC} and can be safely re-executed."
+echo -e "When you run it again, it will automatically check for and apply any updates."
+echo
+echo -e "${YELLOW}TIP: Keep the cloned directory - don't delete it!${NC}"
+echo -e "This allows you to re-run the script whenever you want to:"
+echo -e "  • Get the latest updates and improvements"
+echo -e "  • Reapply configurations"
+echo -e "  • Install newly added tools"
