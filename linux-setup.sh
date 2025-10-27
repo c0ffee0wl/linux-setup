@@ -6,6 +6,7 @@
 set -euo pipefail
 
 VERSION="1.1"
+FORCE_MODE=false
 
 # Colors for output
 RED='\033[0;31m'
@@ -13,6 +14,57 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
+
+# Show usage information
+show_usage() {
+    cat << EOF
+Linux Setup Script v${VERSION}
+Configures a fresh Debian/Kali Linux installation with development tools and customizations
+
+Usage: $0 [OPTIONS]
+
+Options:
+  --force     Run in non-interactive mode, automatically answering 'Yes' to all prompts
+  --help      Display this help message and exit
+
+Interactive Mode (default):
+  The script will prompt for confirmation on certain actions:
+  - Overwriting existing .zshrc configuration
+  - Changing default shell to zsh
+  - Overwriting existing Terminator configuration
+  - Configuring German keyboard layout in XFCE
+
+Force Mode (--force):
+  All prompts are automatically answered 'Yes'. Useful for:
+  - Automated/unattended installations
+  - CI/CD pipelines
+  - Re-running the script to get updates without manual intervention
+
+Examples:
+  $0              # Interactive installation
+  $0 --force      # Non-interactive installation
+
+EOF
+    exit 0
+}
+
+# Parse command-line arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --force|-f)
+            FORCE_MODE=true
+            shift
+            ;;
+        --help|-h)
+            show_usage
+            ;;
+        *)
+            echo -e "${RED}Error: Unknown option '$1'${NC}"
+            echo "Use --help for usage information"
+            exit 1
+            ;;
+    esac
+done
 
 # Logging function
 log() {
@@ -45,6 +97,12 @@ prompt_yes_no() {
     local prompt="$1"
     local default="$2"
     local response
+
+    # In force mode, automatically answer yes
+    if [[ "$FORCE_MODE" == "true" ]]; then
+        log "Force mode: Auto-answering 'Yes' to: $prompt"
+        return 0
+    fi
 
     if [[ "$default" == "Y" ]]; then
         read -p "$prompt (Y/n): " response

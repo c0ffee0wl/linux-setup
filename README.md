@@ -7,6 +7,7 @@
 - [Requirements](#requirements)
 - [Installation](#installation)
   - [Quick Start](#quick-start)
+  - [Usage](#usage)
   - [What the script does:](#what-the-script-does)
   - [Intelligent Installation Strategy](#intelligent-installation-strategy)
 - [Post-Installation](#post-installation)
@@ -78,6 +79,29 @@ git clone https://github.com/c0ffee0wl/linux-setup.git
 cd linux-setup
 ./linux-setup.sh
 ```
+
+### Usage
+
+The script supports the following command-line options:
+
+```bash
+./linux-setup.sh           # Interactive mode (default) - prompts for user confirmation
+./linux-setup.sh --force   # Non-interactive mode - auto-answers "Yes" to all prompts
+./linux-setup.sh --help    # Display usage information
+```
+
+**Interactive Mode (default):**
+By default, the script will prompt you for confirmation on certain actions:
+- Overwriting existing `.zshrc` configuration
+- Changing default shell to zsh
+- Overwriting existing Terminator configuration
+- Configuring German keyboard layout in XFCE
+
+**Force Mode (`--force` or `-f`):**
+Use this flag to run the script non-interactively, automatically answering "Yes" to all prompts. This is useful for:
+- Automated/unattended installations
+- Running in scripts or provisioning tools
+- Re-running the script to get updates without manual intervention
 
 ### What the script does:
 1. **System verification**: Checks OS compatibility and user privileges
