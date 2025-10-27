@@ -515,7 +515,7 @@ log "Configuring zsh..."
 OVERWRITE_ZSHRC=true
 if [ -f ~/.zshrc ]; then
     backup_file ~/.zshrc
-    if ! prompt_yes_no "Overwrite existing .zshrc (initially strongly recommended!)?" "Y"; then
+    if ! prompt_yes_no "Overwrite existing .zshrc (strongly recommended on first run!)?" "Y"; then
         OVERWRITE_ZSHRC=false
         log "Keeping existing .zshrc"
     fi
