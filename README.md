@@ -199,7 +199,7 @@ cat users.txt | awk '{print $5}' | cut -d '/' -f2 | sed '1,2d; $d'
 polster sh         # Isolated, restricted shell environment
 ```
 
-### ripgrep (rg) - Fast Recursive Search
+### [ripgrep](https://github.com/BurntSushi/ripgrep) (rg) - Fast Recursive Search
 
 ```bash
 # Clone example repository for testing
@@ -231,7 +231,7 @@ time grep -i hodor -r
 #   -o: show only matching fragment
 ```
 
-### sd - Search & Displace (sed replacement)
+### [sd](https://github.com/chmln/sd) - Search & Displace (sed replacement)
 
 ```bash
 # Simple text replacement
@@ -244,7 +244,7 @@ cat ~/users.txt | sd '\n' ',' | tail
 echo "sample with /path/" | sd '.*(/.*/)' '$1'
 ```
 
-### fd - Fast File Finder
+### [fd](https://github.com/sharkdp/fd) - Fast File Finder
 
 ```bash
 # Find files by name pattern
@@ -266,7 +266,7 @@ fd -e md
 fd README --type f --exec wc -w   # Count words in all README files
 ```
 
-### moreutils - Advanced Unix Tools
+### [moreutils](https://joeyh.name/code/moreutils/) - Advanced Unix Tools
 
 The `moreutils` package includes several useful utilities, with `sponge` being particularly helpful for in-place file editing:
 
@@ -307,7 +307,7 @@ man sponge
 man combine
 ```
 
-### tldr - Simplified Command Examples
+### [tldr](https://github.com/tldr-pages/tldr) - Simplified Command Examples
 
 `tldr` provides simple, practical examples for command-line tools (community-driven alternative to traditional man pages):
 
@@ -322,7 +322,7 @@ tldr --update
 tldr --list | grep network
 ```
 
-### bat - Syntax-Highlighted File Viewer
+### [bat](https://github.com/sharkdp/bat) - Syntax-Highlighted File Viewer
 
 `bat` is a `cat` clone with syntax highlighting and Git integration:
 
@@ -348,7 +348,7 @@ batcat --paging=never file.py
 
 > **Note**: The script aliases `cat` to `batcat --theme=Coldark-Cold --paging=never` for everyday use.
 
-### jq - JSON Processor
+### [jq](https://jqlang.github.io/jq/) - JSON Processor
 
 `jq` is a lightweight command-line JSON processor:
 
@@ -375,7 +375,7 @@ jq '.users[].email' data.json
 cat package.json | jq '.dependencies' | grep -i react
 ```
 
-### hstr - Enhanced History Search
+### [hstr](https://github.com/dvorka/hstr) - Enhanced History Search
 
 `hstr` provides better command history navigation (configured with `Ctrl+R`):
 
@@ -395,7 +395,12 @@ hstr docker
 # - Better than default Ctrl+R search
 ```
 
-### unp - Universal Unpacker
+**Official Video Tutorials**:
+- [Dvorka's Demo](https://www.youtube.com/watch?v=sPF29NyXe2U) - Demonstration by the creator
+- [Zack's Tutorial](https://www.youtube.com/watch?v=Qd75pIeQkH8) - User tutorial
+- [Yu-Jie Lin's Presentation](https://www.youtube.com/watch?v=Qx5n_5B5xUw) - Feature showcase
+
+### [unp](https://github.com/mitsuhiko/unp) - Universal Unpacker
 
 `unp` automatically detects and extracts various archive formats:
 
@@ -409,7 +414,7 @@ unp data.7z
 # Supported formats: zip, tar, tar.gz, tar.bz2, tar.xz, rar, 7z, deb, rpm, and more
 ```
 
-### httpie - User-Friendly HTTP Client
+### [httpie](https://httpie.io/) - User-Friendly HTTP Client
 
 `httpie` is a modern, user-friendly alternative to `curl` with intuitive syntax, JSON support, and colorized output:
 
@@ -455,7 +460,7 @@ http --session=./session.json https://api.example.com/login username=alice passw
 http --session=./session.json https://api.example.com/profile
 ```
 
-### ncdu - Disk Usage Analyzer
+### [ncdu](https://dev.yorhel.nl/ncdu) - Disk Usage Analyzer
 
 `ncdu` provides an interactive disk usage analyzer:
 
@@ -481,7 +486,7 @@ ncdu -o diskusage.json
 #   q: Quit
 ```
 
-### uv - Fast Python Package Manager
+### [uv](https://github.com/astral-sh/uv) - Fast Python Package Manager
 
 `uv` is an extremely fast Python package installer and resolver, written in Rust. It's **10-100x faster** than pip:
 
@@ -517,7 +522,7 @@ uv pip sync requirements.txt                         # Match requirements exactl
 uv pip list --outdated                               # Check for updates
 ```
 
-### fzf - Fuzzy Finder
+### [fzf](https://github.com/junegunn/fzf) - Fuzzy Finder
 
 `fzf` is a general-purpose command-line fuzzy finder:
 
@@ -546,7 +551,7 @@ rm $(fzf --multi)
 
 > **Note**: The `cd` command is replaced by `zoxide` for smart frecency-based directory navigation.
 
-### zoxide - Smart Directory Navigation
+### [zoxide](https://github.com/ajeetdsouza/zoxide) - Smart Directory Navigation
 
 `zoxide` is a smarter cd command that tracks your most frequently and recently used directories:
 
@@ -582,9 +587,9 @@ tempe mywork
 # Creates temp dir, then creates and enters 'mywork' subdirectory
 ```
 
-### eget - Easy Binary Installation
+### [eget](https://github.com/zyedidia/eget) - Easy Binary Installation
 
-[**eget**](https://github.com/zyedidia/eget) is a tool that makes it easy to install pre-built binaries from GitHub releases:
+eget is a tool that makes it easy to install pre-built binaries from GitHub releases:
 
 ```bash
 eget --help
@@ -608,9 +613,9 @@ eget --system darwin/amd64 sharkdp/fd
 eget https://go.dev/dl/go1.17.5.linux-amd64.tar.gz --file go --to ~/go1.17.5
 ```
 
-### gitsnip - Download Specific Folders from Git Repositories
+### [gitsnip](https://github.com/dagimg-dot/gitsnip) - Download Specific Folders from Git Repositories
 
-[**gitsnip**](https://github.com/dagimg-dot/gitsnip) allows you to download specific folders from any Git repository without cloning the entire repo:
+gitsnip allows you to download specific folders from any Git repository without cloning the entire repo:
 
 ```bash
 # Basic usage: gitsnip <repo-url> <subdir> <output-dir>
@@ -627,9 +632,9 @@ gitsnip https://github.com/user/repo src/utils ./utils -m api
 gitsnip https://github.com/user/private-repo config ./config -t YOUR_GITHUB_TOKEN
 ```
 
-### lazygit - Terminal UI for Git Commands
+### [lazygit](https://github.com/jesseduffield/lazygit) - Terminal UI for Git Commands
 
-[**lazygit**](https://github.com/jesseduffield/lazygit) provides a simple terminal UI for git commands, making complex Git operations intuitive and visual:
+lazygit provides a simple terminal UI for git commands, making complex Git operations intuitive and visual:
 
 ```bash
 # Launch lazygit in current repository
@@ -682,12 +687,12 @@ lg()
 - [Undo/Redo Documentation](https://github.com/jesseduffield/lazygit/blob/master/docs/Undoing.md)
 
 **Official Video Tutorials**:
-- [**15 Lazygit Features in 15 Minutes**](https://youtu.be/CPLdltN7wgE) - Quick feature overview
-- [**Basics Tutorial**](https://youtu.be/VDXvbHZYeKY) - Getting started guide
+- [15 Lazygit Features in 15 Minutes](https://youtu.be/CPLdltN7wgE) - Quick feature overview
+- [Basics Tutorial](https://youtu.be/VDXvbHZYeKY) - Getting started guide
 
-### lazydocker - Terminal UI for Docker
+### [lazydocker](https://github.com/jesseduffield/lazydocker) - Terminal UI for Docker
 
-[**lazydocker**](https://github.com/jesseduffield/lazydocker) provides a simple terminal UI for both docker and docker-compose, making container management visual and intuitive:
+lazydocker provides a simple terminal UI for both docker and docker-compose, making container management visual and intuitive:
 
 ```bash
 # Launch lazydocker
@@ -725,7 +730,7 @@ echo "alias lzd='lazydocker'" >> ~/.zshrc
 - [Keybindings Reference](https://github.com/jesseduffield/lazydocker/blob/master/docs/keybindings)
 
 **Official Video Tutorials**:
-- [**Demo & Basic Tutorial**](https://youtu.be/NICqQPxwJWw) - Introduction and walkthrough
+- [Demo & Basic Tutorial](https://youtu.be/NICqQPxwJWw) - Introduction and walkthrough
 
 ## Configuration Files
 

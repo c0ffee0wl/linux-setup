@@ -7,6 +7,7 @@ set -euo pipefail
 
 VERSION="1.2"
 FORCE_MODE=false
+NO_MODE=false
 
 # Colors for output
 RED='\033[0;31m'
@@ -24,8 +25,10 @@ Configures a fresh Debian/Kali Linux installation with development tools and cus
 Usage: $0 [OPTIONS]
 
 Options:
-  --force     Run in non-interactive mode, automatically answering 'Yes' to all prompts
-  --help      Display this help message and exit
+  --force, -f     Run in non-interactive mode, automatically answering 'Yes' to all prompts
+  --yes, -y       Same as --force
+  --no, -n        Run in non-interactive mode, automatically answering 'No' to all prompts
+  --help, -h      Display this help message and exit
 
 Interactive Mode (default):
   The script will prompt for confirmation on certain actions:
@@ -34,15 +37,22 @@ Interactive Mode (default):
   - Overwriting existing Terminator configuration
   - Configuring German keyboard layout in XFCE
 
-Force Mode (--force):
+Force/Yes Mode (--force, --yes, -f, -y):
   All prompts are automatically answered 'Yes'. Useful for:
   - Automated/unattended installations
   - CI/CD pipelines
   - Re-running the script to get updates without manual intervention
 
+No Mode (--no, -n):
+  All prompts are automatically answered 'No'. Useful for:
+  - Installing packages without overwriting existing configurations
+  - Running the script but skipping optional configurations
+
 Examples:
   $0              # Interactive installation
-  $0 --force      # Non-interactive installation
+  $0 --force      # Non-interactive installation (answer Yes to all)
+  $0 --yes        # Same as --force
+  $0 --no         # Non-interactive installation (answer No to all)
 
 EOF
     exit 0
@@ -51,8 +61,12 @@ EOF
 # Parse command-line arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --force|-f)
+        --force|-f|--yes|-y)
             FORCE_MODE=true
+            shift
+            ;;
+        --no|-n)
+            NO_MODE=true
             shift
             ;;
         --help|-h)
@@ -102,6 +116,12 @@ prompt_yes_no() {
     if [[ "$FORCE_MODE" == "true" ]]; then
         log "Force mode: Auto-answering 'Yes' to: $prompt"
         return 0
+    fi
+
+    # In no mode, automatically answer no
+    if [[ "$NO_MODE" == "true" ]]; then
+        log "No mode: Auto-answering 'No' to: $prompt"
+        return 1
     fi
 
     if [[ "$default" == "Y" ]]; then
@@ -1182,3 +1202,8 @@ echo -e "This allows you to re-run the script whenever you want to:"
 echo -e "  • Get the latest updates and improvements"
 echo -e "  • Reapply configurations"
 echo -e "  • Install newly added tools"
+echo
+echo -e "${BLUE}Automation Options:${NC}"
+echo -e "  • Use ${GREEN}--yes${NC} or ${GREEN}-y${NC} to automatically answer 'Yes' to all prompts"
+echo -e "  • Use ${GREEN}--no${NC} or ${GREEN}-n${NC} to automatically answer 'No' to all prompts"
+echo -e "  • Run ${GREEN}./linux-setup.sh --help${NC} for more information"
