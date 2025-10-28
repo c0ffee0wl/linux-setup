@@ -555,8 +555,9 @@ log "Configuring zsh..."
 # Check if .zshrc exists and prompt for overwrite
 OVERWRITE_ZSHRC=true
 if [ -f ~/.zshrc ]; then
-    backup_file ~/.zshrc
-    if ! prompt_yes_no "Overwrite existing .zshrc (strongly recommended on first run!)?" "Y"; then
+    if prompt_yes_no "Overwrite existing .zshrc (strongly recommended on first run!)?" "Y"; then
+        backup_file ~/.zshrc
+    else
         OVERWRITE_ZSHRC=false
         log "Keeping existing .zshrc"
     fi
@@ -988,8 +989,9 @@ if has_desktop_environment; then
     # Check if Terminator config exists and prompt for overwrite
     OVERWRITE_TERMINATOR=true
     if [ -f ~/.config/terminator/config ]; then
-        backup_file ~/.config/terminator/config
-        if ! prompt_yes_no "Overwrite existing Terminator config?" "N"; then
+        if prompt_yes_no "Overwrite existing Terminator config?" "N"; then
+            backup_file ~/.config/terminator/config
+        else
             OVERWRITE_TERMINATOR=false
             log "Keeping existing Terminator config"
         fi
@@ -1206,4 +1208,3 @@ echo
 echo -e "${BLUE}Automation Options:${NC}"
 echo -e "  • Use ${GREEN}--yes${NC} or ${GREEN}-y${NC} to automatically answer 'Yes' to all prompts"
 echo -e "  • Use ${GREEN}--no${NC} or ${GREEN}-n${NC} to automatically answer 'No' to all prompts"
-echo -e "  • Run ${GREEN}./linux-setup.sh --help${NC} for more information"
