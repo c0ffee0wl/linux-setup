@@ -30,6 +30,10 @@
   - [fzf - Fuzzy Finder](#fzf---fuzzy-finder)
   - [zoxide - Smart Directory Navigation](#zoxide---smart-directory-navigation)
   - [Shell Helper Functions](#shell-helper-functions)
+  - [eget - Easy Binary Installation](#eget---easy-binary-installation)
+  - [gitsnip - Download Specific Folders from Git Repositories](#gitsnip---download-specific-folders-from-git-repositories)
+  - [lazygit - Terminal UI for Git Commands](#lazygit---terminal-ui-for-git-commands)
+  - [lazydocker - Terminal UI for Docker](#lazydocker---terminal-ui-for-docker)
 - [Configuration Files](#configuration-files)
 - [Security Considerations](#security-considerations)
 - [Compatibility](#compatibility)
@@ -482,6 +486,8 @@ ncdu -o diskusage.json
 `uv` is an extremely fast Python package installer and resolver, written in Rust. It's **10-100x faster** than pip:
 
 ```bash
+uv --help
+
 # Package installation (drop-in replacement for pip)
 uv pip install requests pandas numpy
 uv pip install -r requirements.txt
@@ -576,6 +582,151 @@ tempe mywork
 # Creates temp dir, then creates and enters 'mywork' subdirectory
 ```
 
+### eget - Easy Binary Installation
+
+[**eget**](https://github.com/zyedidia/eget) is a tool that makes it easy to install pre-built binaries from GitHub releases:
+
+```bash
+eget --help
+
+# Install tools from GitHub releases
+eget neovim/neovim
+
+# Install specific version
+eget zyedidia/micro --tag nightly
+
+# Install to specific location
+eget jgm/pandoc --to /usr/local/bin
+
+# Install with asset filtering (avoid musl builds)
+eget ogham/exa --asset ^musl
+
+# Install for specific system
+eget --system darwin/amd64 sharkdp/fd
+
+# Download from direct URL
+eget https://go.dev/dl/go1.17.5.linux-amd64.tar.gz --file go --to ~/go1.17.5
+```
+
+### gitsnip - Download Specific Folders from Git Repositories
+
+[**gitsnip**](https://github.com/dagimg-dot/gitsnip) allows you to download specific folders from any Git repository without cloning the entire repo:
+
+```bash
+# Basic usage: gitsnip <repo-url> <subdir> <output-dir>
+# Download a specific folder from a public repository (default method is sparse checkout)
+gitsnip https://github.com/user/repo src/components ./my-components
+
+# Download from specific branch
+gitsnip https://github.com/user/repo docs ./docs -b develop
+
+# Use API method instead of sparse checkout
+gitsnip https://github.com/user/repo src/utils ./utils -m api
+
+# Download from private repository (requires GitHub token)
+gitsnip https://github.com/user/private-repo config ./config -t YOUR_GITHUB_TOKEN
+```
+
+### lazygit - Terminal UI for Git Commands
+
+[**lazygit**](https://github.com/jesseduffield/lazygit) provides a simple terminal UI for git commands, making complex Git operations intuitive and visual:
+
+```bash
+# Launch lazygit in current repository
+lazygit
+
+# Create convenient alias (add to .zshrc)
+echo "alias lg='lazygit'" >> ~/.zshrc
+
+# Advanced: Change directory on exit
+# If you change repos in lazygit and want your shell to change directory into that repo on exiting lazygit, add this to your ~/.zshrc (or other rc file)
+lg()
+{
+    export LAZYGIT_NEW_DIR_FILE=~/.lazygit/newdir
+    lazygit "$@"
+    if [ -f $LAZYGIT_NEW_DIR_FILE ]; then
+            cd "$(cat $LAZYGIT_NEW_DIR_FILE)"
+            rm -f $LAZYGIT_NEW_DIR_FILE > /dev/null
+    fi
+}
+```
+
+**Key Features**:
+- **Stage individual lines** - Partial staging with intuitive interface
+- **Interactive rebase** - Squash, fixup, drop, edit, reorder commits visually
+- **Cherry-pick** - Visual cherry-picking of commits
+- **Amend old commits** - Fix commits deep in history
+- **Undo/Redo** - Easy mistake recovery
+- **Commit graph** - Visualize branch structure
+- **Git worktrees** - Manage multiple working trees
+- **Custom commands** - Define your own keybindings
+- **Rebase magic** - Create custom patches interactively
+
+**Common Keyboard Shortcuts** (inside lazygit):
+- `Space` - Stage/unstage files or hunks
+- `a` - Stage/unstage all
+- `c` - Commit changes
+- `P` - Push
+- `p` - Pull
+- `e` - Edit file
+- `o` - Open file
+- `s` - Stash changes
+- `i` - Start interactive rebase
+- `r` - Refresh
+- `?` - Show keybindings help
+
+**Documentation**:
+- [GitHub Repository](https://github.com/jesseduffield/lazygit)
+- [Configuration Guide](https://github.com/jesseduffield/lazygit/blob/master/docs/Config.md)
+- [Keybindings Reference](https://github.com/jesseduffield/lazygit/blob/master/docs/keybindings)
+- [Undo/Redo Documentation](https://github.com/jesseduffield/lazygit/blob/master/docs/Undoing.md)
+
+**Official Video Tutorials**:
+- [**15 Lazygit Features in 15 Minutes**](https://youtu.be/CPLdltN7wgE) - Quick feature overview
+- [**Basics Tutorial**](https://youtu.be/VDXvbHZYeKY) - Getting started guide
+
+### lazydocker - Terminal UI for Docker
+
+[**lazydocker**](https://github.com/jesseduffield/lazydocker) provides a simple terminal UI for both docker and docker-compose, making container management visual and intuitive:
+
+```bash
+# Launch lazydocker
+lazydocker
+
+# Create convenient alias (add to .zshrc)
+echo "alias lzd='lazydocker'" >> ~/.zshrc
+```
+
+**Key Features**:
+- **Container overview** - View all containers and services at a glance
+- **Real-time logs** - Stream logs from containers with color coding
+- **Metrics graphs** - ASCII graphs of CPU, memory, and network usage
+- **Quick actions** - Restart, remove, rebuild containers with single keys
+- **Image management** - View image layers and ancestry
+- **Pruning** - Clean up unused containers, images, and volumes
+- **Mouse support** - Click to navigate (optional)
+- **Custom commands** - Define your own shortcuts
+- **docker-compose support** - Full integration with compose services
+
+**Common Keyboard Shortcuts** (inside lazydocker):
+- `[` / `]` - Navigate between containers, images, volumes
+- `m` - View container logs
+- `s` - View container stats
+- `e` - Execute shell in container
+- `r` - Restart container
+- `d` - Remove container
+- `p` - Prune unused resources
+- `x` - Execute custom command
+- `?` - Show keybindings help
+
+**Documentation**:
+- [GitHub Repository](https://github.com/jesseduffield/lazydocker)
+- [Configuration Guide](https://github.com/jesseduffield/lazydocker/blob/master/docs/Config.md)
+- [Keybindings Reference](https://github.com/jesseduffield/lazydocker/blob/master/docs/keybindings)
+
+**Official Video Tutorials**:
+- [**Demo & Basic Tutorial**](https://youtu.be/NICqQPxwJWw) - Introduction and walkthrough
+
 ## Configuration Files
 
 The script creates/modifies these configuration files:
@@ -652,6 +803,8 @@ This section provides a comprehensive reference of all tools installed by the sc
 | **httpie** | [httpie.io](https://httpie.io/) | [Documentation](https://httpie.io/docs/cli) |
 | **name-that-hash** | [GitHub](https://github.com/HashPals/Name-That-Hash) | [README](https://github.com/HashPals/Name-That-Hash#usage) |
 | **tldr** | [GitHub](https://github.com/tldr-pages/tldr) | [Documentation](https://github.com/tldr-pages/tldr#how-do-i-use-it) |
+| **eget** | [GitHub](https://github.com/zyedidia/eget) | [Documentation](https://github.com/zyedidia/eget/blob/master/DOCS.md) |
+| **gitsnip** | [GitHub](https://github.com/dagimg-dot/gitsnip) | [README](https://github.com/dagimg-dot/gitsnip#readme) |
 
 ### Shell & Terminal
 
@@ -661,6 +814,7 @@ This section provides a comprehensive reference of all tools installed by the sc
 | **hstr** | [GitHub](https://github.com/dvorka/hstr) | [README](https://github.com/dvorka/hstr#usage) |
 | **zoxide** | [GitHub](https://github.com/ajeetdsouza/zoxide) | [README](https://github.com/ajeetdsouza/zoxide#readme) |
 | **up** | [GitHub](https://github.com/akavel/up) | [README](https://github.com/akavel/up#usage) |
+| **lazygit** | [GitHub](https://github.com/jesseduffield/lazygit) | [Documentation](https://github.com/jesseduffield/lazygit#readme) |
 | **terminator** | [terminator-gtk3](https://gnome-terminator.org/) | [Documentation](https://gnome-terminator.readthedocs.io/) |
 
 ### Programming Languages & Runtimes
@@ -686,6 +840,7 @@ This section provides a comprehensive reference of all tools installed by the sc
 | Tool | Homepage | Documentation |
 |------|----------|---------------|
 | **Docker CE** | [docker.com](https://www.docker.com/) | [Documentation](https://docs.docker.com/) |
+| **lazydocker** | [GitHub](https://github.com/jesseduffield/lazydocker) | [Documentation](https://github.com/jesseduffield/lazydocker#readme) |
 | **ufw-docker** | [GitHub](https://github.com/chaifeng/ufw-docker) | [README](https://github.com/chaifeng/ufw-docker#ufw-docker) |
 | **bubblewrap** | [GitHub](https://github.com/containers/bubblewrap) | [man page](https://github.com/containers/bubblewrap#bubblewrap) |
 

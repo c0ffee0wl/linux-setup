@@ -1,11 +1,11 @@
 #!/bin/bash
 
 # Linux Setup Script
-# Configures a fresh Debian / Kali Linux installation with development tools and customizations
+# Configures a fresh Kali Linux / Debian / Ubuntu installation with development tools and customizations
 
 set -euo pipefail
 
-VERSION="1.1"
+VERSION="1.2"
 FORCE_MODE=false
 
 # Colors for output
@@ -159,6 +159,21 @@ has_desktop_environment() {
     fi
 
     return 1
+}
+
+# Install Go tool
+# Usage: install_go_tool <tool-name> <go-package-path>
+install_go_tool() {
+    local tool_name="$1"
+    local package_path="$2"
+
+    log "Installing ${tool_name}..."
+    if ! command -v "$tool_name" &> /dev/null; then
+        export PATH=$HOME/go/bin:$PATH
+        go install -v "$package_path"
+    else
+        log "${tool_name} is already installed"
+    fi
 }
 
 # Install Rust via rustup
@@ -387,9 +402,9 @@ fi
 # Install Python tools with uv
 log "Installing Python tools with uv..."
 if command -v uv &> /dev/null; then
-    uv tool install httpie
-    uv tool install name-that-hash
-    uv tool install tldr
+    uv tool install --force httpie
+    uv tool install --force name-that-hash
+    uv tool install --force tldr
 else
     warn "uv not available, skipping Python tools installation"
 fi
@@ -471,6 +486,12 @@ if ! command -v up &> /dev/null; then
 else
     log "up tool is already installed"
 fi
+
+# Install Go-based tools
+install_go_tool "eget" "github.com/zyedidia/eget@latest"
+install_go_tool "lazygit" "github.com/jesseduffield/lazygit@latest"
+install_go_tool "lazydocker" "github.com/jesseduffield/lazydocker@latest"
+install_go_tool "gitsnip" "github.com/dagimg-dot/gitsnip/cmd/gitsnip@latest"
 
 # Install zoxide (smarter cd)
 log "Installing zoxide..."
@@ -1043,8 +1064,11 @@ if is_kali_linux; then
     # Install all Project Discovery tools
     log "Installing all Project Discovery tools..."
     if command -v pdtm &> /dev/null; then
+        log "Updating pdtm itself..."
+        pdtm -self-update
+        log "Installing all tools..."
         pdtm -install-all
-        log "Updating all Project Discovery tools..."
+        log "Updating all tools..."
         pdtm -update-all
     else
         warn "pdtm installation failed, skipping tool installation"
@@ -1063,8 +1087,8 @@ if is_kali_linux; then
     # Install Python tools with uv (Kali-specific tools)
     log "Installing Python tools for Kali with uv..."
     if command -v uv &> /dev/null; then
-        uv tool install bbot
-        uv tool install git+https://github.com/Pennyw0rth/NetExec
+        uv tool install --force bbot
+        uv tool install --force git+https://github.com/Pennyw0rth/NetExec
     else
         warn "uv not available, skipping Python tools installation"
     fi
