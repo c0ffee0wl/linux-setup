@@ -187,6 +187,24 @@ has_desktop_environment() {
     return 1
 }
 
+# Get installed Go version as comparable number
+# Returns version in format: 1.19 -> 119, 1.24 -> 124
+get_go_version() {
+    if ! command -v go &> /dev/null; then
+        echo "0"
+        return
+    fi
+
+    local go_version=$(go version 2>/dev/null | grep -oP 'go\K[0-9]+\.[0-9]+' | head -1)
+    if [ -z "$go_version" ]; then
+        echo "0"
+        return
+    fi
+
+    # Convert to comparable number (e.g., "1.19" -> 119, "1.24" -> 124)
+    echo "$go_version" | awk -F. '{print ($1 * 100) + $2}'
+}
+
 # Install Go tool
 # Usage: install_go_tool <tool-name> <go-package-path>
 install_go_tool() {
@@ -515,8 +533,19 @@ fi
 
 # Install Go-based tools
 install_go_tool "eget" "github.com/zyedidia/eget@latest"
-install_go_tool "lazygit" "github.com/jesseduffield/lazygit@latest"
-install_go_tool "lazydocker" "github.com/jesseduffield/lazydocker@latest"
+
+# lazygit and lazydocker require Go 1.24+
+GO_VERSION=$(get_go_version)
+MINIMUM_GO_VERSION=124  # Go 1.24
+
+if [ "$GO_VERSION" -ge "$MINIMUM_GO_VERSION" ]; then
+    install_go_tool "lazygit" "github.com/jesseduffield/lazygit@latest"
+    install_go_tool "lazydocker" "github.com/jesseduffield/lazydocker@latest"
+else
+    GO_VERSION_STR=$(go version 2>/dev/null | grep -oP 'go\K[0-9]+\.[0-9]+' | head -1)
+    warn "Skipping lazygit and lazydocker - require Go 1.24+, found Go ${GO_VERSION_STR:-unknown}"
+fi
+
 install_go_tool "gitsnip" "github.com/dagimg-dot/gitsnip/cmd/gitsnip@latest"
 
 # Install zoxide (smarter cd)
