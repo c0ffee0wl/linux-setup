@@ -167,8 +167,14 @@ has_desktop_environment() {
         return 0
     fi
 
-    # Check for display server environment variables (X11 or Wayland)
-    if [ -n "$DISPLAY" ] || [ -n "$WAYLAND_DISPLAY" ]; then
+    # Check for actual running display server (X11 or Wayland)
+    # Don't just check $DISPLAY variable - verify X server is actually responding
+    if [ -n "$DISPLAY" ] && command -v xset &> /dev/null && xset q &> /dev/null; then
+        return 0
+    fi
+
+    # Check for Wayland display server
+    if [ -n "$WAYLAND_DISPLAY" ] && [ -S "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/$WAYLAND_DISPLAY" ]; then
         return 0
     fi
 
