@@ -156,31 +156,8 @@ is_kali_linux() {
 
 # Check if desktop environment is available
 has_desktop_environment() {
-    # Check for graphical systemd targets
-    if systemctl is-active --quiet graphical.target 2>/dev/null || \
-       systemctl is-active --quiet graphical-session.target 2>/dev/null; then
-        return 0
-    fi
-
     # Check for desktop environment processes (expanded list for Gnome, KDE, XFCE, etc.)
     if pgrep -f "xfce4-session\|gnome-session\|gnome-shell\|kde-session\|lxsession\|plasma\|cinnamon" > /dev/null 2>&1; then
-        return 0
-    fi
-
-    # Check for actual running display server (X11 or Wayland)
-    # Don't just check $DISPLAY variable - verify X server is actually responding
-    if [ -n "$DISPLAY" ] && command -v xset &> /dev/null && xset q &> /dev/null; then
-        return 0
-    fi
-
-    # Check for Wayland display server
-    if [ -n "$WAYLAND_DISPLAY" ] && [ -S "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/$WAYLAND_DISPLAY" ]; then
-        return 0
-    fi
-
-    # Check for desktop environment configuration tools
-    if command -v xfconf-query &> /dev/null || \
-       command -v gsettings &> /dev/null; then
         return 0
     fi
 
@@ -541,12 +518,12 @@ MINIMUM_GO_VERSION=124  # Go 1.24
 if [ "$GO_VERSION" -ge "$MINIMUM_GO_VERSION" ]; then
     install_go_tool "lazygit" "github.com/jesseduffield/lazygit@latest"
     install_go_tool "lazydocker" "github.com/jesseduffield/lazydocker@latest"
+    install_go_tool "gitsnip" "github.com/dagimg-dot/gitsnip/cmd/gitsnip@latest"
 else
     GO_VERSION_STR=$(go version 2>/dev/null | grep -oP 'go\K[0-9]+\.[0-9]+' | head -1)
-    warn "Skipping lazygit and lazydocker - require Go 1.24+, found Go ${GO_VERSION_STR:-unknown}"
+    warn "Skipping lazygit, lazydocker and gitsnip - require Go 1.24+, found Go ${GO_VERSION_STR:-unknown}"
 fi
 
-install_go_tool "gitsnip" "github.com/dagimg-dot/gitsnip/cmd/gitsnip@latest"
 
 # Install zoxide (smarter cd)
 log "Installing zoxide..."
