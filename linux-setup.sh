@@ -156,8 +156,14 @@ is_kali_linux() {
 
 # Check if desktop environment is available
 has_desktop_environment() {
-    # Check for desktop environment processes (expanded list for Gnome, KDE, XFCE, etc.)
-    if pgrep -f "xfce4-session\|gnome-session\|gnome-shell\|kde-session\|lxsession\|plasma\|cinnamon" > /dev/null 2>&1; then
+    # Check for actual running display server (X11 or Wayland)
+    # Don't just check $DISPLAY variable - verify X server is actually responding
+    if [ -n "$DISPLAY" ] && command -v xset &> /dev/null && xset q &> /dev/null; then
+        return 0
+    fi
+
+    # Check for Wayland display server
+    if [ -n "$WAYLAND_DISPLAY" ] && [ -S "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/$WAYLAND_DISPLAY" ]; then
         return 0
     fi
 
