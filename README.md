@@ -493,19 +493,15 @@ ncdu -o diskusage.json
 ```bash
 uv --help
 
-# Package installation (drop-in replacement for pip)
-uv pip install requests pandas numpy
-uv pip install -r requirements.txt
-
 # Virtual environment management
 uv venv .venv
 source .venv/bin/activate
 uv pip install flask
 
-# Run Python tools without installing (like pipx)
-uv tool run ruff check .              # Run ruff linter
-uv tool run black .                   # Run black formatter
-uv tool run httpie httpbin.org/get    # Run httpie
+# Run Python tools without installing (uvx is shorthand for uv tool run)
+uv tool run ruff                      # Run tool without parameters
+uv tool run httpie httpbin.org/get    # Run tool with parameters
+uv tool run git+https://github.com/astral-sh/ruff  # Run tool directly from Git
 
 # Install tools globally
 uv tool install ruff
