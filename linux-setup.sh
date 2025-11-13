@@ -301,7 +301,7 @@ sudo apt-get install -y \
 
 # Install Rust - either from repo (if >= 1.85) or via rustup
 log "Checking Rust version in repositories..."
-REPO_RUST_VERSION=$(apt-cache policy rustc 2>/dev/null | grep -oP 'Candidate:\s*\K[0-9]+\.[0-9]+' | head -1)
+REPO_RUST_VERSION=$(apt-cache policy rustc 2>/dev/null | grep -oP 'Candidate:\s*\K[0-9]+\.[0-9]+' | head -1 || true)
 
 if [ -z "$REPO_RUST_VERSION" ]; then
     REPO_RUST_VERSION="0.0"
@@ -329,7 +329,7 @@ fi
 
 # Install Node.js - either from repo (if >= 20) or via nvm
 log "Checking Node.js version in repositories..."
-REPO_NODE_VERSION=$(apt-cache policy nodejs 2>/dev/null | grep -oP 'Candidate:\s*\K[0-9]+' | head -1)
+REPO_NODE_VERSION=$(apt-cache policy nodejs 2>/dev/null | grep -oP 'Candidate:\s*\K[0-9]+' | head -1 || true)
 
 if [ -z "$REPO_NODE_VERSION" ]; then
     REPO_NODE_VERSION=0
