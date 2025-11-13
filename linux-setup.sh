@@ -156,14 +156,22 @@ is_kali_linux() {
 
 # Check if desktop environment is available
 has_desktop_environment() {
-    # Check for actual running display server (X11 or Wayland)
-    # Don't just check $DISPLAY variable - verify X server is actually responding
-    if [ -n "$DISPLAY" ] && command -v xset &> /dev/null && xset q &> /dev/null; then
+    # Check for desktop session files (most reliable)
+    if [ -d /usr/share/xsessions ] && [ -n "$(ls -A /usr/share/xsessions 2>/dev/null)" ]; then
         return 0
     fi
 
-    # Check for Wayland display server
-    if [ -n "$WAYLAND_DISPLAY" ] && [ -S "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/$WAYLAND_DISPLAY" ]; then
+    if [ -d /usr/share/wayland-sessions ] && [ -n "$(ls -A /usr/share/wayland-sessions 2>/dev/null)" ]; then
+        return 0
+    fi
+
+    # Check for display manager configuration
+    if [ -f /etc/X11/default-display-manager ] && [ -s /etc/X11/default-display-manager ]; then
+        return 0
+    fi
+
+    # Check for common DE packages (Kali uses XFCE)
+    if dpkg -l 2>/dev/null | grep -qE '^ii\s+(xfce4|gnome-shell|kde-plasma-desktop|plasma-desktop|lxde-core)' || false; then
         return 0
     fi
 
