@@ -282,7 +282,6 @@ sudo apt-get install -y \
     hstr \
     bubblewrap \
     ripgrep \
-    sd \
     fd-find \
     moreutils \
     unp \
@@ -537,6 +536,14 @@ if ! command -v zoxide &> /dev/null; then
     cargo install zoxide --locked
 else
     log "zoxide is already installed"
+fi
+
+# Install sd (modern sed replacement)
+log "Installing sd..."
+if ! command -v sd &> /dev/null; then
+    sudo apt-get install -y sd || cargo install sd
+else
+    log "sd is already installed"
 fi
 
 # Disable screensaver and power management
