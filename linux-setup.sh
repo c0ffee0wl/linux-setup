@@ -3,7 +3,7 @@
 # Linux Setup Script
 # Configures a fresh Kali Linux / Debian / Ubuntu installation with development tools and customizations
 
-set -euo pipefail
+set -eo pipefail
 
 VERSION="1.2"
 FORCE_MODE=false
@@ -186,7 +186,7 @@ get_go_version() {
         return
     fi
 
-    local go_version=$(go version 2>/dev/null | grep -oP 'go\K[0-9]+\.[0-9]+' | head -1)
+    local go_version=$(go version 2>/dev/null | grep -oP 'go\K[0-9]+\.[0-9]+' | head -1 || true)
     if [ -z "$go_version" ]; then
         echo "0"
         return
@@ -224,7 +224,7 @@ install_rust_via_rustup() {
     export PATH="$CARGO_HOME/bin:$PATH"
 
     if [ -f "$HOME/.cargo/env" ]; then
-        source "$HOME/.cargo/env"
+        source "$HOME/.cargo/env" || true
     fi
 
     log "Rust installed successfully via rustup"
@@ -251,7 +251,7 @@ if git rev-parse --git-dir > /dev/null 2>&1; then
     git fetch origin 2>/dev/null || true
 
     # Count commits we don't have that remote has
-    BEHIND=$(git rev-list HEAD..@{u} 2>/dev/null | wc -l)
+    BEHIND=$(git rev-list HEAD..@{u} 2>/dev/null | wc -l || echo "0")
 
     if [ "$BEHIND" -gt 0 ]; then
         log "Updates found! Pulling latest changes..."
@@ -363,11 +363,11 @@ if ! command -v node &> /dev/null; then
 
             # Source nvm immediately for this script
             export NVM_DIR="$HOME/.nvm"
-            [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+            [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh" || true
         else
             log "nvm is already installed"
             export NVM_DIR="$HOME/.nvm"
-            [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+            [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh" || true
         fi
 
         # Install Node 22 via nvm
@@ -465,8 +465,8 @@ if ! command -v docker &> /dev/null; then
     sudo apt-get install -y docker-ce
     
     # Enable and start Docker service
-    sudo systemctl enable docker
-    sudo systemctl start docker
+    sudo systemctl enable docker || true
+    sudo systemctl start docker || true
     
     log "Docker CE installed and started successfully. You'll need to log out and back in for group changes to take effect."
 else
@@ -533,7 +533,7 @@ if [ "$GO_VERSION" -ge "$MINIMUM_GO_VERSION" ]; then
     install_go_tool "lazydocker" "github.com/jesseduffield/lazydocker@latest"
     install_go_tool "gitsnip" "github.com/dagimg-dot/gitsnip/cmd/gitsnip@latest"
 else
-    GO_VERSION_STR=$(go version 2>/dev/null | grep -oP 'go\K[0-9]+\.[0-9]+' | head -1)
+    GO_VERSION_STR=$(go version 2>/dev/null | grep -oP 'go\K[0-9]+\.[0-9]+' | head -1 || true)
     warn "Skipping lazygit, lazydocker and gitsnip - require Go 1.24+, found Go ${GO_VERSION_STR:-unknown}"
 fi
 
@@ -559,11 +559,11 @@ if has_desktop_environment; then
     log "Disabling screensaver and power save options..."
     if command -v xfconf-query &> /dev/null; then
         # Disable screensaver and lock screen (create setting if it doesn't exist)
-        xfconf-query -c xfce4-screensaver -p /saver/enabled --create -t bool -s false
-        xfconf-query -c xfce4-screensaver -p /lock/enabled --create -t bool -s false
-        
+        xfconf-query -c xfce4-screensaver -p /saver/enabled --create -t bool -s false || true
+        xfconf-query -c xfce4-screensaver -p /lock/enabled --create -t bool -s false || true
+
         # Disable Display Power Management entirely
-        xfconf-query -c xfce4-power-manager -p /xfce4-power-manager/dpms-enabled --create -t bool -s false
+        xfconf-query -c xfce4-power-manager -p /xfce4-power-manager/dpms-enabled --create -t bool -s false || true
     else
         warn "xfconf-query not available, skipping power management configuration"
     fi
@@ -1093,8 +1093,7 @@ EOF
     fi
 
     if [[ ! -f ~/.config/terminator/plugins/tab_numbers.py ]]; then
-        wget -O ~/.config/terminator/plugins/tab_numbers.py https://raw.githubusercontent.com/c0ffee0wl/terminator-tab-numbers-plugin/main/tab_numbers.py
-        if [[ $? -eq 0 ]]; then
+        if wget -O ~/.config/terminator/plugins/tab_numbers.py https://raw.githubusercontent.com/c0ffee0wl/terminator-tab-numbers-plugin/main/tab_numbers.py; then
             log "Terminator tab numbers plugin installed successfully"
         else
             warn "Failed to download Terminator tab numbers plugin"
@@ -1134,7 +1133,7 @@ if is_kali_linux; then
         log "Installing BloodHoundAnalyzer..."
         sudo git clone --depth=1 https://github.com/c0ffee0wl/BloodHoundAnalyzer /opt/BloodHoundAnalyzer
         sudo chown -R "$(whoami)":"$(whoami)" /opt/BloodHoundAnalyzer
-        cd /opt/BloodHoundAnalyzer && ./install.sh
+        (cd /opt/BloodHoundAnalyzer && ./install.sh) || warn "BloodHoundAnalyzer installation script failed"
     else
         log "BloodHoundAnalyzer is already installed"
     fi
@@ -1176,7 +1175,7 @@ if systemctl is-active --quiet systemd-resolved 2>/dev/null; then
 DNSStubListener=no
 EOF
     sudo ln -sf /run/systemd/resolve/resolv.conf /etc/resolv.conf
-    sudo systemctl restart systemd-resolved
+    sudo systemctl restart systemd-resolved || true
     log "systemd-resolved configured successfully"
 else
     log "systemd-resolved not active, skipping configuration"
@@ -1204,8 +1203,8 @@ if has_desktop_environment; then
     if command -v xfconf-query &> /dev/null; then
         if prompt_yes_no "Configure German keyboard layout in XFCE?" "N"; then
             log "Configuring Xfce keyboard layout to German..."
-            xfconf-query -c keyboard-layout -p /Default/XkbDisable --create -t bool -s false
-            xfconf-query -c keyboard-layout -p /Default/XkbLayout --create -t string -s "de"
+            xfconf-query -c keyboard-layout -p /Default/XkbDisable --create -t bool -s false || true
+            xfconf-query -c keyboard-layout -p /Default/XkbLayout --create -t string -s "de" || true
             log "German keyboard layout configured"
         else
             log "Skipping keyboard layout configuration"
