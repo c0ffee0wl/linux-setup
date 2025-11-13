@@ -5,7 +5,7 @@
 
 set -eo pipefail
 
-VERSION="1.2"
+VERSION="1.3"
 FORCE_MODE=false
 NO_MODE=false
 
