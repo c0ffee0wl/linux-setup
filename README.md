@@ -92,20 +92,31 @@ The script supports the following command-line options:
 ./linux-setup.sh           # Interactive mode (default) - prompts for user confirmation
 ./linux-setup.sh --force   # Non-interactive mode - auto-answers "Yes" to all prompts
 ./linux-setup.sh --help    # Display usage information
+
+# NOT RECOMMENDED ON FIRST RUN, because then some customizations are not installed
+./linux-setup.sh --no      # Non-interactive mode - auto-answers "No" to all prompts. 
 ```
 
 **Interactive Mode (default):**
 By default, the script will prompt you for confirmation on certain actions:
-- Overwriting existing `.zshrc` configuration
-- Changing default shell to zsh
-- Overwriting existing Terminator configuration
-- Configuring German keyboard layout in XFCE
+- Overwriting existing `.zshrc` configuration (default: Yes)
+- Changing default shell to zsh (default: Yes)
+- Overwriting existing Terminator configuration (default: No)
+- Configuring German keyboard layout in XFCE (default: No)
+
+**Notes:**
+- Backups are automatically created with timestamps before overwriting any files
+- All package installations (Docker, Go, Rust, Node.js, tools, etc.) happen automatically without prompts
 
 **Force Mode (`--force` or `-f`):**
 Use this flag to run the script non-interactively, automatically answering "Yes" to all prompts. This is useful for:
 - Automated/unattended installations
 - Running in scripts or provisioning tools
-- Re-running the script to get updates without manual intervention
+
+**No Mode (`--no` or `-n`):**
+Use this flag to run the script non-interactively, automatically answering "No" to all prompts. This is useful for:
+- Installing packages without overwriting existing configurations
+- Running the script but skipping optional configurations
 
 ### What the script does:
 1. **System verification**: Checks OS compatibility and user privileges
