@@ -766,9 +766,9 @@ The script creates/modifies these configuration files:
 | Distribution | Status | Notes |
 |-------------|---------|-------|
 | Kali Linux  | ✅ Full support | All features enabled |
-| Debian      | ✅ Compatible | Pentesting tools skipped |
-| Ubuntu      | ✅ Compatible | Pentesting tools skipped |
-| Other Debian-based | ⚠️ May work | Limited testing |
+| Debian      | ✅ Compatible | Pentesting tools skipped. Tested: 12, 13 |
+| Ubuntu      | ✅ Compatible | Pentesting tools skipped. Tested: 22.04 LTS, 24.04 LTS |
+| Other Debian-based | ⚠️ May work | Not tested |
 
 ## Tools Reference
 
