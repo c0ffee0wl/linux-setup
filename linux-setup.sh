@@ -778,6 +778,14 @@ if [ "$color_prompt" = yes ]; then
 
     configure_prompt
 
+    # enable auto-suggestions based on the history
+    if [ -f /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh ]; then
+        . /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh
+        # change suggestion color
+        ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='fg=240'
+        ZSH_AUTOSUGGEST_USE_ASYNC=1
+    fi
+
     # enable syntax-highlighting
     if [ -f /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh ]; then
         . /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
@@ -897,13 +905,6 @@ alias ll='ls -l'
 alias la='ls -A'
 alias l='ls -CF'
 
-# enable auto-suggestions based on the history
-if [ -f /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh ]; then
-    . /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh
-    # change suggestion color
-    ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='fg=#999'
-fi
-
 # enable command-not-found if installed
 if [ -f /etc/zsh_command_not_found ]; then
     . /etc/zsh_command_not_found
@@ -912,8 +913,6 @@ fi
 # ==========================================
 # Linux Setup Script Custom Enhancements
 # ==========================================
-
-unset ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE
 
 # Enhanced tab completion
 setopt complete_in_word       # cd /ho/ka/Dow<TAB> expands to /home/kali/Downloads
