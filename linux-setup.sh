@@ -447,27 +447,78 @@ fi
 log "Installing Docker CE..."
 if ! command -v docker &> /dev/null; then
     # Remove conflicting packages
-    for pkg in docker.io docker-doc docker-compose docker-compose-v2 podman-docker containerd runc; do sudo apt-get remove -y $pkg || true; done
-    
+    for pkg in docker.io docker-doc docker-compose docker-compose-v2 podman-docker containerd runc; do sudo apt-get remove -y "$pkg" || true; done
+
+    # Detect distribution and codename
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        DISTRO_ID="$ID"
+
+        # For Ubuntu derivatives (Mint, Pop!_OS, etc.), use UBUNTU_CODENAME if available
+        if [ "$ID" = "ubuntu" ] || [ "$ID_LIKE" = "ubuntu" ] || echo "$ID_LIKE" | grep -q "ubuntu"; then
+            DOCKER_DISTRO="ubuntu"
+            DOCKER_CODENAME="${UBUNTU_CODENAME:-$VERSION_CODENAME}"
+
+            # Validate against supported Ubuntu versions
+            case "$DOCKER_CODENAME" in
+                oracular|plucky|noble|jammy)
+                    # Officially supported Ubuntu versions (25.10, 25.04, 24.04 LTS, 22.04 LTS)
+                    ;;
+                *)
+                    log "Warning: Ubuntu codename '$DOCKER_CODENAME' is not officially supported by Docker. Falling back to Bookworm."
+                    DOCKER_DISTRO="debian"
+                    DOCKER_CODENAME="bookworm"
+                    ;;
+            esac
+        elif [ "$ID" = "debian" ] || [ "$ID" = "kali" ] || echo "$ID_LIKE" | grep -q "debian"; then
+            DOCKER_DISTRO="debian"
+            DOCKER_CODENAME="$VERSION_CODENAME"
+
+            # Validate against supported Debian versions
+            case "$DOCKER_CODENAME" in
+                trixie|bookworm|bullseye)
+                    # Officially supported Debian versions (13, 12, 11)
+                    ;;
+                kali-rolling)
+                    # Kali uses Debian repos, default to bookworm
+                    DOCKER_CODENAME="bookworm"
+                    ;;
+                *)
+                    log "Warning: Debian codename '$DOCKER_CODENAME' is not officially supported by Docker. Falling back to Bookworm."
+                    DOCKER_CODENAME="bookworm"
+                    ;;
+            esac
+        else
+            log "Warning: Unknown distribution '$ID'. Falling back to Debian Bookworm."
+            DOCKER_DISTRO="debian"
+            DOCKER_CODENAME="bookworm"
+        fi
+    else
+        log "Warning: Cannot detect distribution. Falling back to Debian Bookworm."
+        DOCKER_DISTRO="debian"
+        DOCKER_CODENAME="bookworm"
+    fi
+
+    log "Using Docker repository: $DOCKER_DISTRO/$DOCKER_CODENAME"
+
     # Add Docker's official GPG key
     sudo install -m 0755 -d /etc/apt/keyrings
-    sudo curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+    sudo curl -fsSL https://download.docker.com/linux/$DOCKER_DISTRO/gpg -o /etc/apt/keyrings/docker.asc
     sudo chmod a+r /etc/apt/keyrings/docker.asc
 
     # Add the repository to Apt sources
-    DOCKER_CODENAME="bookworm"
     echo \
-      "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian $DOCKER_CODENAME stable" | \
+      "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/$DOCKER_DISTRO $DOCKER_CODENAME stable" | \
       sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-    
-    # Install Docker CE
+
+    # Install Docker CE and components
     sudo apt-get update
-    sudo apt-get install -y docker-ce
-    
+    sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
     # Enable and start Docker service
     sudo systemctl enable docker || true
     sudo systemctl start docker || true
-    
+
     log "Docker CE installed and started successfully. You'll need to log out and back in for group changes to take effect."
 else
     log "Docker is already installed"
@@ -477,8 +528,8 @@ fi
 log "Configuring Docker group and permissions..."
 sudo groupadd docker 2>/dev/null || true
 sudo usermod -aG docker $USER
-if [[ -d /home/"$USER"/.docker ]]; then
-    sudo chown "$USER":"$USER" /home/"$USER"/.docker -R
+if [[ -d "$HOME/.docker" ]]; then
+    sudo chown "$USER":"$USER" "$HOME/.docker" -R
     sudo chmod g+rwx "$HOME/.docker" -R
 fi
 
@@ -516,7 +567,7 @@ log "Installing up tool..."
 if ! command -v up &> /dev/null; then
     export PATH=$HOME/go/bin:$PATH
     go install -v github.com/akavel/up@latest
-    sudo cp $(which up) /usr/local/bin/ 2>/dev/null || sudo cp $HOME/go/bin/up /usr/local/bin/
+    sudo cp "$(which up)" /usr/local/bin/ 2>/dev/null || sudo cp "$HOME/go/bin/up" /usr/local/bin/
 else
     log "up tool is already installed"
 fi
@@ -1005,7 +1056,7 @@ fi
 log "Checking default shell..."
 if [[ "$SHELL" != "/usr/bin/zsh" && "$SHELL" != "/bin/zsh" ]]; then
     if prompt_yes_no "Change default shell to zsh?" "Y"; then
-        sudo chsh -s $(which zsh) $USER
+        sudo chsh -s "$(which zsh)" "$USER"
         log "Default shell changed to zsh. You'll need to log out and back in for the change to take effect."
     else
         log "Keeping current shell: $SHELL"
