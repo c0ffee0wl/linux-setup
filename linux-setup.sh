@@ -305,7 +305,9 @@ sudo apt-get install -y \
     python3-pip \
     python3-venv \
     golang \
-    zsh
+    zsh \
+    zsh-autosuggestions \
+    zsh-syntax-highlighting
 
 # Install Rust - either from repo (if >= 1.85) or via rustup
 log "Checking Rust version in repositories..."
