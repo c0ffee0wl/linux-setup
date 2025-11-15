@@ -94,6 +94,16 @@ error() {
     exit 1
 }
 
+# Check if running as root
+if [[ $EUID -eq 0 ]]; then
+    warn "This script should normally not be run as root. Please run as a regular user with sudo privileges."
+fi
+
+# Check if we're on a Debian-based system (hard requirement)
+if ! grep -qE "(debian|ID_LIKE.*debian)" /etc/os-release 2>/dev/null; then
+    error "This script requires a Debian-based Linux distribution. Detected system is not compatible."
+fi
+
 # Backup a file with timestamp
 backup_file() {
     local file_path="$1"
@@ -139,19 +149,19 @@ prompt_yes_no() {
     fi
 }
 
-# Check if running as root
-if [[ $EUID -eq 0 ]]; then
-    warn "This script should normally not be run as root. Please run as a regular user with sudo privileges."
-fi
-
-# Check if we're on a Debian-based system (hard requirement)
-if ! grep -qE "(debian|ID_LIKE.*debian)" /etc/os-release 2>/dev/null; then
-    error "This script requires a Debian-based Linux distribution. Detected system is not compatible."
-fi
-
 # Check if we're on Kali Linux (preferred but not required)
 is_kali_linux() {
     grep -q "Kali" /etc/os-release 2>/dev/null
+}
+
+# Check if we're on Ubuntu or Ubuntu-based distribution
+is_ubuntu() {
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        [ "$ID" = "ubuntu" ] || [ "$ID_LIKE" = "ubuntu" ] || echo "$ID_LIKE" | grep -q "ubuntu"
+    else
+        return 1
+    fi
 }
 
 # Check if desktop environment is available
@@ -452,27 +462,26 @@ if ! command -v docker &> /dev/null; then
     for pkg in docker.io docker-doc docker-compose docker-compose-v2 podman-docker containerd runc; do sudo apt-get remove -y "$pkg" || true; done
 
     # Detect distribution and codename
-    if [ -f /etc/os-release ]; then
+    if is_ubuntu; then
         . /etc/os-release
-        DISTRO_ID="$ID"
+        DOCKER_DISTRO="ubuntu"
+        DOCKER_CODENAME="${UBUNTU_CODENAME:-$VERSION_CODENAME}"
 
-        # For Ubuntu derivatives (Mint, Pop!_OS, etc.), use UBUNTU_CODENAME if available
-        if [ "$ID" = "ubuntu" ] || [ "$ID_LIKE" = "ubuntu" ] || echo "$ID_LIKE" | grep -q "ubuntu"; then
-            DOCKER_DISTRO="ubuntu"
-            DOCKER_CODENAME="${UBUNTU_CODENAME:-$VERSION_CODENAME}"
+        # Validate against supported Ubuntu versions
+        case "$DOCKER_CODENAME" in
+            oracular|plucky|noble|jammy)
+                # Officially supported Ubuntu versions (25.10, 25.04, 24.04 LTS, 22.04 LTS)
+                ;;
+            *)
+                log "Warning: Ubuntu codename '$DOCKER_CODENAME' is not officially supported by Docker. Falling back to Bookworm."
+                DOCKER_DISTRO="debian"
+                DOCKER_CODENAME="bookworm"
+                ;;
+        esac
+    elif [ -f /etc/os-release ]; then
+        . /etc/os-release
 
-            # Validate against supported Ubuntu versions
-            case "$DOCKER_CODENAME" in
-                oracular|plucky|noble|jammy)
-                    # Officially supported Ubuntu versions (25.10, 25.04, 24.04 LTS, 22.04 LTS)
-                    ;;
-                *)
-                    log "Warning: Ubuntu codename '$DOCKER_CODENAME' is not officially supported by Docker. Falling back to Bookworm."
-                    DOCKER_DISTRO="debian"
-                    DOCKER_CODENAME="bookworm"
-                    ;;
-            esac
-        elif [ "$ID" = "debian" ] || [ "$ID" = "kali" ] || echo "$ID_LIKE" | grep -q "debian"; then
+        if [ "$ID" = "debian" ] || [ "$ID" = "kali" ] || echo "$ID_LIKE" | grep -q "debian"; then
             DOCKER_DISTRO="debian"
             DOCKER_CODENAME="$VERSION_CODENAME"
 
@@ -635,6 +644,33 @@ else
     log "No desktop environment detected - skipping terminal configuration"
 fi
 
+# Configure .zshenv for Ubuntu systems to skip global compinit
+if is_ubuntu; then
+    log "Configuring .zshenv for Ubuntu (skip global compinit for faster startup)..."
+
+    OVERWRITE_ZSHENV=true
+    if [ -f ~/.zshenv ]; then
+        if prompt_yes_no "Overwrite existing .zshenv?" "Y"; then
+            backup_file ~/.zshenv
+        else
+            OVERWRITE_ZSHENV=false
+            log "Keeping existing .zshenv"
+        fi
+    fi
+
+    if [ "$OVERWRITE_ZSHENV" = true ]; then
+        cat > ~/.zshenv << 'EOF'
+# Skip Ubuntu's global compinit for faster zsh startup
+# Ubuntu sources /etc/zsh/zshrc which runs compinit, but we handle
+# completion initialization more efficiently in ~/.zshrc with caching
+skip_global_compinit=1
+EOF
+        log ".zshenv configured successfully"
+    fi
+else
+    log "Not Ubuntu - skipping .zshenv configuration"
+fi
+
 # Configure zsh with Kali Linux default baseline plus enhancements
 log "Configuring zsh..."
 
@@ -685,7 +721,11 @@ bindkey '^[[Z' undo                               # shift + tab undo last action
 
 # enable completion features
 autoload -Uz compinit
-compinit -d ~/.cache/zcompdump
+# Only update completion cache once a day to speed up zsh start
+if [ "$(find ~/.cache/zcompdump -mtime 1)" ] ; then
+    compinit -d ~/.cache/zcompdump
+fi
+compinit -C
 zstyle ':completion:*:*:*:*:*' menu select
 zstyle ':completion:*' auto-description 'specify: %d'
 zstyle ':completion:*' completer _expand _complete
@@ -785,6 +825,7 @@ if [ "$color_prompt" = yes ]; then
         . /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh
         # change suggestion color
         ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='fg=240'
+        ZSH_AUTOSUGGEST_BUFFER_MAX_SIZE='50'
         ZSH_AUTOSUGGEST_USE_ASYNC=1
     fi
 
@@ -1021,8 +1062,8 @@ mkcd() {
 }
 
 tempe() {
-  \cd "$(mktemp -d)"
-  chmod -R 0700 .
+  local tmpdir="$(mktemp -d)"
+  \cd "$tmpdir" && chmod -R 0700 "$tmpdir"
   if [[ $# -eq 1 ]]; then
     \mkdir -p "$1"
     \cd "$1"
