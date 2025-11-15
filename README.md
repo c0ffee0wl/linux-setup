@@ -22,6 +22,7 @@
   - [tldr - Simplified Command Examples](#tldr---simplified-command-examples)
   - [bat - Syntax-Highlighted File Viewer](#bat---syntax-highlighted-file-viewer)
   - [jq - JSON Processor](#jq---json-processor)
+  - [Arrow Key History Search](#arrow-key-history-search)
   - [hstr - Enhanced History Search](#hstr---enhanced-history-search)
   - [unp - Universal Unpacker](#unp---universal-unpacker)
   - [httpie - User-Friendly HTTP Client](#httpie---user-friendly-http-client)
@@ -385,6 +386,18 @@ jq '.users[].email' data.json
 # Combine with other tools
 cat package.json | jq '.dependencies' | grep -i react
 ```
+
+### Arrow Key History Search
+
+The shell is configured with incremental history search using the up/down arrow keys. Simply type the beginning of a command and press the up arrow to search backward through commands that start with what you've typed, or down arrow to search forward.
+
+```bash
+# Type a command prefix, then press up/down arrows
+git  # Press up arrow to cycle through commands starting with 'git'
+cd   # Press up arrow to find previous 'cd' commands
+```
+
+This provides quick access to recent commands without needing to launch a full search interface. For more advanced history search with filtering and visual interface, use hstr (see below).
 
 ### [hstr](https://github.com/dvorka/hstr) - Enhanced History Search
 
