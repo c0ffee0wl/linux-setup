@@ -9,7 +9,6 @@
   - [Quick Start](#quick-start)
   - [Usage](#usage)
   - [What the script does:](#what-the-script-does)
-  - [Intelligent Installation Strategy](#intelligent-installation-strategy)
 - [Post-Installation](#post-installation)
 - [Usage Examples](#usage-examples)
   - [Terminator Terminal](#terminator-terminal)
@@ -47,12 +46,6 @@
   - [Containerization & Security](#containerization--security)
   - [GUI Applications (Only Installed When GUI Detected)](#gui-applications-only-installed-when-gui-detected)
   - [Kali Linux Specific Tools (Only Installed on Kali)](#kali-linux-specific-tools-only-installed-on-kali)
-- [Features](#features)
-  - [Development Tools](#development-tools)
-  - [Containerization](#containerization)
-  - [Terminal & Shell](#terminal--shell)
-  - [Productivity Tools](#productivity-tools)
-  - [System Configuration](#system-configuration)
 - [Troubleshooting](#troubleshooting)
   - [Common Issues](#common-issues)
   - [Debug Mode](#debug-mode)
@@ -72,7 +65,6 @@ This script configures a fresh Debian-based Linux system (optimized for Kali Lin
 ## Requirements
 
 - **OS**: Debian-based Linux distribution (Ubuntu, Debian, Kali Linux)
-- **User**: Non-root user with sudo privileges
 - **Network**: Internet connection for package downloads
 - **Storage**: ~2GB free space for all tools and dependencies
 
@@ -126,24 +118,6 @@ Use this flag to run the script non-interactively, automatically answering "No" 
 4. **Configuration**: Sets up shell, terminal, and system preferences
 5. **Security setup**: Configures Docker and sandboxing tools
 6. **Cleanup**: Removes unnecessary packages and cleans package cache
-
-### Intelligent Installation Strategy
-
-The script uses adaptive installation methods to ensure you get modern versions of critical development tools:
-
-**Rust Installation:**
-- Checks repository version availability
-- If repository has Rust >= 1.85: Installs from apt repositories
-- If repository version < 1.85: Installs via [rustup](https://rustup.rs/) for the latest stable toolchain
-- Automatically configures PATH and environment for both methods
-
-**Node.js Installation:**
-- Checks repository version availability
-- If repository has Node.js >= 20: Installs from apt repositories
-- If repository version < 20: Installs Node.js 22 via [nvm](https://github.com/nvm-sh/nvm) (Node Version Manager)
-- Automatically configures shell integration for nvm when used
-
-This ensures you always get modern, compatible versions regardless of your distribution's package repository age.
 
 ## Post-Installation
 
@@ -890,48 +864,6 @@ This section provides a comprehensive reference of all tools installed by the sc
 | **bbot** | [GitHub](https://github.com/blacklanternsecurity/bbot) | [Documentation](https://www.blacklanternsecurity.com/bbot/) |
 | **NetExec** | [GitHub](https://github.com/Pennyw0rth/NetExec) | [Wiki](https://github.com/Pennyw0rth/NetExec/wiki) |
 | **BloodHoundAnalyzer** | [GitHub](https://github.com/c0ffee0wl/BloodHoundAnalyzer) | [README](https://github.com/c0ffee0wl/BloodHoundAnalyzer) |
-
-## Features
-
-### Development Tools
-- **Build essentials**: gcc, make, build tools
-- **Languages**: Go, Rust/Cargo, Python 3 with pip
-- **Adaptive installation**: Automatic selection of rustup (Rust >= 1.85) or nvm (Node >= 20) when repo versions are outdated
-- **Package managers**: uv (modern Python package installer), pipx for isolated Python applications
-- **Version managers**: rustup and nvm support for managing multiple toolchain versions
-
-### Containerization
-- **Docker CE**: Latest Docker Community Edition
-- **User configuration**: Automatic docker group membership
-- **Service management**: Auto-start Docker daemon
-- **Firewall integration**: ufw-docker for firewall rule management
-- **DNS optimization**: systemd-resolved stub listener disabled for container networking
-- **Port conflict prevention**: avahi-daemon disabled to free port 5353
-
-### Terminal & Shell
-- **Shell**: Zsh with enhanced configuration based on Kali defaults
-- **Terminal**: Terminator as default with custom configuration
-- **Terminator plugins**: Tab numbers plugin for improved navigation
-- **Terminal styling**: Custom GTK padding (8px) for better readability
-- **History**: Enhanced history management with HSTR integration
-- **Navigation**: zoxide for frecency-based directory jumping
-- **Search tools**: ripgrep, fd-find, fzf for fast file operations
-
-### Productivity Tools
-- **File management**: tree, meld for directory visualization and file comparison  
-- **Text processing**: sd (sed alternative), moreutils
-- **Interactive tools**: up tool for live command building
-- **Security sandboxing**: bubblewrap for isolated command execution
-
-### System Configuration
-- **Power management**: Disabled screensaver and power saving (XFCE)
-- **Keyboard**: German layout configuration (XFCE)
-- **Display**: Optimized for development workflow
-- **Security**: User-level execution (no root required)
-- **Terminal padding**: 8px GTK terminal padding for better readability
-- **DNS optimization**: systemd-resolved stub listener disabled for tool compatibility
-- **Network services**: avahi-daemon disabled to prevent port conflicts (5353)
-- **Terminator enhancements**: Tab numbers plugin for improved tab navigation
 
 ## Troubleshooting
 
