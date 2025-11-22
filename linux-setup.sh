@@ -722,10 +722,17 @@ bindkey '^[[Z' undo                               # shift + tab undo last action
 # enable completion features
 autoload -Uz compinit
 # Only update completion cache once a day to speed up zsh start
-if [ "$(find ~/.cache/zcompdump -mtime 1)" ] ; then
-    compinit -d ~/.cache/zcompdump
+zcompdump_file="${XDG_CACHE_HOME:-$HOME/.cache}/zcompdump"
+mkdir -p "${zcompdump_file%/*}"
+# Check if cache is fresh (less than 20 hours old)
+if [[ -n $zcompdump_file(#qNmh-20) ]]; then
+  # Cache exists and is fresh - use it without checks
+  compinit -C -d "$zcompdump_file"
+else
+  # Cache is stale or doesn't exist - regenerate
+  compinit -i -d "$zcompdump_file"
+  touch "$zcompdump_file"
 fi
-compinit -C
 zstyle ':completion:*:*:*:*:*' menu select
 zstyle ':completion:*' auto-description 'specify: %d'
 zstyle ':completion:*' completer _expand _complete
