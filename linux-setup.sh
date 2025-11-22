@@ -1094,6 +1094,49 @@ export NVM_DIR="$HOME/.nvm"
 EOF
 fi
 
+# Migrate bash history to zsh if switching from bash
+if [[ -f ~/.bash_history && "$SHELL" =~ bash ]]; then
+    if prompt_yes_no "Migrate your bash history to zsh?" "Y"; then
+        log "Migrating bash history to zsh..."
+
+        # Backup existing zsh_history if it exists
+        if [ -f ~/.zsh_history ]; then
+            backup_file ~/.zsh_history
+        fi
+
+        # Convert bash history to zsh format using inline Python script
+        # Based on: https://gist.github.com/muendelezaji/c14722ab66b505a49861b8a74e52b274
+        if cat ~/.bash_history | python3 -c '
+import sys
+import time
+
+timestamp = None
+for line in sys.stdin.readlines():
+    line = line.rstrip("\n")
+    if line.startswith("#") and timestamp is None:
+        t = line[1:]
+        if t.isdigit():
+            timestamp = t
+            continue
+    else:
+        sys.stdout.write(": %s:0;%s\n" % (timestamp or int(time.time()), line))
+        timestamp = None
+' >> ~/.zsh_history 2>/dev/null; then
+            log "Bash history successfully migrated to ~/.zsh_history"
+        else
+            log "Warning: Failed to migrate bash history. Continuing anyway..."
+        fi
+    else
+        log "Skipping bash history migration"
+    fi
+else
+    if [[ ! -f ~/.bash_history ]]; then
+        log "No bash history file found, skipping migration"
+    elif [[ ! "$SHELL" =~ bash ]]; then
+        log "Not switching from bash, skipping history migration"
+    fi
+fi
+
 # Change default shell to zsh if not already zsh
 log "Checking default shell..."
 if [[ "$SHELL" != "/usr/bin/zsh" && "$SHELL" != "/bin/zsh" ]]; then
