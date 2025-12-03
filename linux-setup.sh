@@ -538,7 +538,7 @@ fi
 # Configure Docker group and permissions
 log "Configuring Docker group and permissions..."
 sudo groupadd docker 2>/dev/null || true
-sudo usermod -aG docker $USER
+sudo usermod -aG docker "$USER"
 if [[ -d "$HOME/.docker" ]]; then
     sudo chown "$USER":"$USER" "$HOME/.docker" -R
     sudo chmod g+rwx "$HOME/.docker" -R
@@ -1140,7 +1140,7 @@ else
     if [[ ! -f ~/.bash_history ]]; then
         log "No bash history file found, skipping migration"
     elif [[ ! "$SHELL" =~ bash ]]; then
-        log "Not switching from bash, skipping history migration"
+        log "Current shell is not bash, skipping history migration"
     fi
 fi
 
