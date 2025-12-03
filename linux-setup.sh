@@ -1340,6 +1340,7 @@ log "Performing final cleanup..."
 sudo apt-get autoremove -y
 sudo apt-get clean
 go clean -cache -modcache || true
+uv cache clean || true
 
 # Configure Xfce keyboard layout to German
 if has_desktop_environment; then
