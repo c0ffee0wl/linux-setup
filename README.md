@@ -176,12 +176,12 @@ Classic Unix command pipelines with `awk`, `cut`, and `sed`, previewed with [up 
 ```bash
 # Toggle between command and result with Ctrl+P (up tool integration)
 cat users.txt |    # Press Ctrl+P to interactively build the pipeline
-# Press Ctrl+X when satisied with the sandboxed preview to actually execute
+# Press Ctrl+X when satisfied with the sandboxed preview to actually execute
 
 # Process user data: extract field, trim path, remove header/footer
 cat users.txt | awk '{print $5}' | cut -d '/' -f2 | sed '1,2d; $d'
 
-# Sandboxed shell execution with bubblewrap
+# Sandboxed shell execution with bubblewrap (polster is a custom alias defined by this setup)
 polster sh         # Isolated, restricted shell environment
 ```
 
@@ -398,7 +398,7 @@ hstr docker
 - [Zack's Tutorial](https://www.youtube.com/watch?v=Qd75pIeQkH8) - User tutorial
 - [Yu-Jie Lin's Presentation](https://www.youtube.com/watch?v=Qx5n_5B5xUw) - Feature showcase
 
-### [unp](https://github.com/mitsuhiko/unp) - Universal Unpacker
+### [unp](https://packages.debian.org/bookworm/unp) - Universal Unpacker
 
 `unp` automatically detects and extracts various archive formats:
 
@@ -784,7 +784,7 @@ This section provides a comprehensive reference of all tools installed by the sc
 | **lsof** | [lsof](https://github.com/lsof-org/lsof) | [man page](https://man7.org/linux/man-pages/man8/lsof.8.html) |
 | **ncdu** | [ncdu](https://dev.yorhel.nl/ncdu) | [man page](https://dev.yorhel.nl/ncdu/man) |
 | **tree** | [tree](http://mama.indstate.edu/users/ice/tree/) | [man page](https://linux.die.net/man/1/tree) |
-| **unp** | [unp](https://github.com/mitsuhiko/unp) | [GitHub](https://github.com/mitsuhiko/unp) |
+| **unp** | [Debian Package](https://packages.debian.org/bookworm/unp) | [man page](https://manpages.debian.org/bookworm/unp/unp.1.en.html) |
 | **exiftool** | [exiftool.org](https://exiftool.org/) | [Documentation](https://exiftool.org/exiftool_pod.html) |
 | **ufw** | [UFW](https://launchpad.net/ufw) | [man page](https://manpages.ubuntu.com/manpages/focal/man8/ufw.8.html) |
 
