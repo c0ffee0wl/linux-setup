@@ -25,10 +25,11 @@ Configures a fresh Debian/Kali Linux installation with development tools and cus
 Usage: $0 [OPTIONS]
 
 Options:
-  --force, -f     Run in non-interactive mode, automatically answering 'Yes' to all prompts
-  --yes, -y       Same as --force
-  --no, -n        Run in non-interactive mode, automatically answering 'No' to all prompts
-  --help, -h      Display this help message and exit
+  --force, -f          Run in non-interactive mode, automatically answering 'Yes' to all prompts
+  --yes, -y            Same as --force
+  --no, -n             Run in non-interactive mode, automatically answering 'No' to all prompts
+  --no-hacking-tools   Skip installation of hacking/pentest tools (even on Kali)
+  --help, -h           Display this help message and exit
 
 Interactive Mode (default):
   The script will prompt for confirmation on certain actions:
@@ -67,6 +68,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --no|-n)
             NO_MODE=true
+            shift
+            ;;
+        --no-hacking-tools)
+            NO_HACKING_TOOLS=true
             shift
             ;;
         --help|-h)
@@ -420,11 +425,11 @@ else
 fi
 
 # Install Kali-specific package - only install on Kali Linux
-if is_kali_linux; then
+if is_kali_linux && [ "$NO_HACKING_TOOLS" != true ]; then
     log "Installing hacking tools..."
     sudo apt-get install -y massdns mitmproxy || true
 else
-    warn "Skipping hacking tools installation - only available on Kali Linux"
+    warn "Skipping hacking tools installation"
 fi
 
 # Install pipx (Python application installer)
@@ -648,18 +653,11 @@ fi
 if is_ubuntu; then
     log "Configuring .zshenv for Ubuntu (skip global compinit for faster startup)..."
 
-    OVERWRITE_ZSHENV=true
-    if [ -f ~/.zshenv ]; then
-        if prompt_yes_no "Overwrite existing .zshenv?" "Y"; then
-            backup_file ~/.zshenv
-        else
-            OVERWRITE_ZSHENV=false
-            log "Keeping existing .zshenv"
-        fi
-    fi
+    if [ -f ~/.zshenv ] && grep -q 'skip_global_compinit=1' ~/.zshenv; then
+        log ".zshenv already has skip_global_compinit setting"
+    else
+        cat >> ~/.zshenv << 'EOF'
 
-    if [ "$OVERWRITE_ZSHENV" = true ]; then
-        cat > ~/.zshenv << 'EOF'
 # Skip Ubuntu's global compinit for faster zsh startup
 # Ubuntu sources /etc/zsh/zshrc which runs compinit, but we handle
 # completion initialization more efficiently in ~/.zshrc with caching
@@ -1250,7 +1248,7 @@ else
     log "No desktop environment detected - skipping Terminator configuration"
 fi
 
-if is_kali_linux; then
+if is_kali_linux && [ "$NO_HACKING_TOOLS" != true ]; then
 
     # Install Project Discovery tool manager (Kali-specific tools)
     log "Installing Project Discovery tool manager..."

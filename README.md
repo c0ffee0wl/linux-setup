@@ -87,7 +87,10 @@ The script supports the following command-line options:
 ./linux-setup.sh --help    # Display usage information
 
 # NOT RECOMMENDED ON FIRST RUN, because then some customizations are not installed
-./linux-setup.sh --no      # Non-interactive mode - auto-answers "No" to all prompts. 
+./linux-setup.sh --no      # Non-interactive mode - auto-answers "No" to all prompts
+
+# Skip hacking tools even on Kali Linux
+./linux-setup.sh --no-hacking-tools
 ```
 
 **Interactive Mode (default):**
@@ -110,6 +113,13 @@ Use this flag to run the script non-interactively, automatically answering "Yes"
 Use this flag to run the script non-interactively, automatically answering "No" to all prompts. This is useful for:
 - Installing packages without overwriting existing configurations
 - Running the script but skipping optional configurations
+
+**No Hacking Tools (`--no-hacking-tools`):**
+Use this flag to skip installation of hacking/pentest tools even when running on Kali Linux. Skipped tools include:
+- massdns, mitmproxy
+- Project Discovery tools (pdtm and all tools it installs)
+- BloodHoundAnalyzer
+- bbot, NetExec
 
 ### What the script does:
 1. **System verification**: Checks OS compatibility and user privileges
