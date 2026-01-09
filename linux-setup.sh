@@ -478,9 +478,9 @@ if ! command -v docker &> /dev/null; then
                 # Officially supported Ubuntu versions (25.10, 25.04, 24.04 LTS, 22.04 LTS)
                 ;;
             *)
-                log "Warning: Ubuntu codename '$DOCKER_CODENAME' is not officially supported by Docker. Falling back to Bookworm."
+                log "Warning: Ubuntu codename '$DOCKER_CODENAME' is not officially supported by Docker. Falling back to Trixie."
                 DOCKER_DISTRO="debian"
-                DOCKER_CODENAME="bookworm"
+                DOCKER_CODENAME="trixie"
                 ;;
         esac
     elif [ -f /etc/os-release ]; then
@@ -496,23 +496,23 @@ if ! command -v docker &> /dev/null; then
                     # Officially supported Debian versions (13, 12, 11)
                     ;;
                 kali-rolling)
-                    # Kali uses Debian repos, default to bookworm
-                    DOCKER_CODENAME="bookworm"
+                    # Kali uses Debian repos, default to trixie
+                    DOCKER_CODENAME="trixie"
                     ;;
                 *)
-                    log "Warning: Debian codename '$DOCKER_CODENAME' is not officially supported by Docker. Falling back to Bookworm."
-                    DOCKER_CODENAME="bookworm"
+                    log "Warning: Debian codename '$DOCKER_CODENAME' is not officially supported by Docker. Falling back to Trixie."
+                    DOCKER_CODENAME="trixie"
                     ;;
             esac
         else
-            log "Warning: Unknown distribution '$ID'. Falling back to Debian Bookworm."
+            log "Warning: Unknown distribution '$ID'. Falling back to Debian Trixie."
             DOCKER_DISTRO="debian"
-            DOCKER_CODENAME="bookworm"
+            DOCKER_CODENAME="trixie"
         fi
     else
-        log "Warning: Cannot detect distribution. Falling back to Debian Bookworm."
+        log "Warning: Cannot detect distribution. Falling back to Debian Trixie."
         DOCKER_DISTRO="debian"
-        DOCKER_CODENAME="bookworm"
+        DOCKER_CODENAME="trixie"
     fi
 
     log "Using Docker repository: $DOCKER_DISTRO/$DOCKER_CODENAME"
