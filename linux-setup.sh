@@ -169,6 +169,68 @@ is_ubuntu() {
     fi
 }
 
+# Update or add a single export in ~/.profile (idempotent)
+# Uses grep to check existence, sed to update in place, or appends if new
+#
+# Usage: update_profile_export <var_name> <var_value>
+#   var_name:  Environment variable name (e.g., DO_NOT_TRACK)
+#   var_value: Value to set (will be quoted in the export)
+#
+# Returns: 0 on success
+update_profile_export() {
+    local var_name="$1"
+    local var_value="$2"
+    local profile_file="$HOME/.profile"
+
+    # Create file if it doesn't exist
+    [ ! -f "$profile_file" ] && touch "$profile_file"
+
+    # Escape special characters for shell double-quoted string:
+    # - Backslashes must be escaped first (before other escapes add more)
+    # - Double quotes, dollar signs, and backticks need escaping
+    local escaped_value="$var_value"
+    escaped_value="${escaped_value//\\/\\\\}"    # \ -> \\
+    escaped_value="${escaped_value//\"/\\\"}"    # " -> \"
+    escaped_value="${escaped_value//\$/\\\$}"    # $ -> \$
+    escaped_value="${escaped_value//\`/\\\`}"    # ` -> \`
+
+    # For sed replacement, also escape & (special in replacement string)
+    local sed_value="$escaped_value"
+    sed_value="${sed_value//&/\\&}"              # & -> \&
+
+    if grep -q "^export ${var_name}=" "$profile_file" 2>/dev/null; then
+        # Update existing export in place
+        sed -i "s|^export ${var_name}=.*|export ${var_name}=\"${sed_value}\"|" "$profile_file"
+    else
+        # Append new export
+        echo "export ${var_name}=\"${escaped_value}\"" >> "$profile_file"
+    fi
+}
+
+# Ensure ~/.zprofile sources ~/.profile for ZSH compatibility
+# ZSH doesn't read ~/.profile by default, so we add a source line
+# This is idempotent - only adds the line if not already present
+# Skips on Kali Linux (already sources .profile in default .zshrc)
+#
+# Usage: ensure_zprofile_sources_profile
+ensure_zprofile_sources_profile() {
+    # Kali Linux already sources .profile in its default ZSH config
+    is_kali_linux && return 0
+
+    local zprofile="$HOME/.zprofile"
+    local source_line='[[ -f ~/.profile ]] && emulate sh -c "source ~/.profile"'
+
+    # Create file if it doesn't exist
+    [ ! -f "$zprofile" ] && touch "$zprofile"
+
+    # Add source line if not present (using fixed string match)
+    if ! grep -qF "$source_line" "$zprofile" 2>/dev/null; then
+        echo "" >> "$zprofile"
+        echo "# Source ~/.profile for environment variables (added by linux-setup)" >> "$zprofile"
+        echo "$source_line" >> "$zprofile"
+    fi
+}
+
 # Check if desktop environment is available
 has_desktop_environment() {
     # Check for desktop session files (most reliable)
@@ -1334,6 +1396,34 @@ if systemctl is-active --quiet avahi-daemon 2>/dev/null; then
 else
     log "avahi-daemon not active, skipping configuration"
 fi
+
+#############################################################################
+# Privacy/Telemetry Defaults
+#############################################################################
+
+# Set telemetry/privacy defaults for dev tools
+# These apply even if tools are installed manually later
+log "Setting privacy/telemetry environment defaults..."
+
+# Universal opt-out signal (proposed standard)
+update_profile_export "DO_NOT_TRACK" "1"
+
+# VS Code / .NET / PowerShell / Azure
+update_profile_export "VSCODE_TELEMETRY_DISABLE" "1"
+update_profile_export "VSCODE_CRASH_REPORTER_DISABLE" "1"
+update_profile_export "DOTNET_CLI_TELEMETRY_OPTOUT" "1"
+update_profile_export "POWERSHELL_TELEMETRY_OPTOUT" "1"
+update_profile_export "AZURE_CORE_COLLECT_TELEMETRY" "0"
+
+# Python packaging tools
+update_profile_export "PYPI_DISABLE_TELEMETRY" "1"
+update_profile_export "UV_NO_TELEMETRY" "1"
+update_profile_export "SCARF_ANALYTICS" "false"
+
+# Ensure ZSH sources ~/.profile on non-Kali systems
+ensure_zprofile_sources_profile
+
+log "Privacy defaults configured in ~/.profile"
 
 # Final cleanup
 log "Performing final cleanup..."
