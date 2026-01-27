@@ -891,14 +891,23 @@ if [ "$color_prompt" = yes ]; then
 
     # enable auto-suggestions based on the history
     if [ -f /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh ]; then
-        . /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh
-        # change suggestion color
-        ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='fg=240'
+        # Pre-config (MUST be set BEFORE sourcing)
         ZSH_AUTOSUGGEST_BUFFER_MAX_SIZE='50'
         ZSH_AUTOSUGGEST_USE_ASYNC=1
+        ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='fg=240'
+        # Fix conflict with history search widgets (phantom text / double-press issue)
+        ZSH_AUTOSUGGEST_CLEAR_WIDGETS+=(
+            history-beginning-search-backward-end
+            history-beginning-search-forward-end
+            history-beginning-search-backward
+            history-beginning-search-forward
+            up-line-or-beginning-search
+            down-line-or-beginning-search
+        )
+        . /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh
     fi
 
-    # enable syntax-highlighting
+    # enable syntax-highlighting (MUST be loaded after autosuggestions)
     if [ -f /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh ]; then
         . /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
         ZSH_HIGHLIGHT_HIGHLIGHTERS=(main brackets pattern)
