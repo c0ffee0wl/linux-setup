@@ -1013,6 +1013,7 @@ if [ -x /usr/bin/dircolors ]; then
     export LESS_TERMCAP_se=$'\E[0m'        # reset reverse video
     export LESS_TERMCAP_us=$'\E[1;32m'     # begin underline
     export LESS_TERMCAP_ue=$'\E[0m'        # reset underline
+    export MANROFFOPT="-c"                 # groff 1.23+: use classic output for LESS_TERMCAP
 
     # Take advantage of $LS_COLORS for completion as well
     zstyle ':completion:*' list-colors "${(s.:.)LS_COLORS}"
