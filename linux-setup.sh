@@ -895,16 +895,14 @@ if [ "$color_prompt" = yes ]; then
         ZSH_AUTOSUGGEST_BUFFER_MAX_SIZE='50'
         ZSH_AUTOSUGGEST_USE_ASYNC=1
         ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='fg=240'
-        # Fix conflict with history search widgets (phantom text / double-press issue)
+        . /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh
+        # Add custom widgets to clear list AFTER sourcing (to preserve defaults like accept-line)
         ZSH_AUTOSUGGEST_CLEAR_WIDGETS+=(
             history-beginning-search-backward-end
             history-beginning-search-forward-end
             history-beginning-search-backward
             history-beginning-search-forward
-            up-line-or-beginning-search
-            down-line-or-beginning-search
         )
-        . /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh
     fi
 
     # enable syntax-highlighting (MUST be loaded after autosuggestions)
