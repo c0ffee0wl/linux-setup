@@ -414,52 +414,35 @@ else
     log "Rust is already installed"
 fi
 
-# Install Node.js - either from repo (if >= 20) or via nvm
-log "Checking Node.js version in repositories..."
-REPO_NODE_VERSION=$(apt-cache policy nodejs 2>/dev/null | grep -oP 'Candidate:\s*\K[0-9]+' | head -1 || true)
+# Install Bun (JavaScript/TypeScript runtime, package manager, drop-in Node.js replacement)
+log "Installing Bun..."
+if ! command -v bun &> /dev/null; then
+    curl -fsSL https://bun.com/install | bash
 
-if [ -z "$REPO_NODE_VERSION" ]; then
-    REPO_NODE_VERSION=0
-    warn "Could not determine repository Node.js version"
+    # Source bun environment for this script
+    export BUN_INSTALL="$HOME/.bun"
+    export PATH="$BUN_INSTALL/bin:$PATH"
+
+    log "Bun installed successfully"
+else
+    log "Bun is already installed"
 fi
 
-MINIMUM_NODE_VERSION=20
-
-log "Repository has Node.js version: $REPO_NODE_VERSION (minimum required: $MINIMUM_NODE_VERSION)"
-
-if ! command -v node &> /dev/null; then
-    # Node.js not installed - choose installation method based on repo version
-    if [ "$REPO_NODE_VERSION" -ge "$MINIMUM_NODE_VERSION" ]; then
-        log "Installing Node.js from repositories (version $REPO_NODE_VERSION)..."
-        sudo apt-get install -y nodejs npm
-    else
-        log "Repository version $REPO_NODE_VERSION is < 20, installing Node 22 via nvm..."
-
-        # Install nvm
-        if [ ! -d "$HOME/.nvm" ]; then
-            log "Installing nvm..."
-            curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
-
-            # Source nvm immediately for this script
-            export NVM_DIR="$HOME/.nvm"
-            [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh" || true
-        else
-            log "nvm is already installed"
-            export NVM_DIR="$HOME/.nvm"
-            [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh" || true
-        fi
-
-        # Install Node 22 via nvm
-        log "Installing Node.js 22 via nvm..."
-        nvm install 22
-        nvm use 22
-        nvm alias default 22
-
-        # Set flag to indicate nvm was installed (for .zshrc update)
-        NVM_INSTALLED=true
-    fi
+# Create node/npx symlinks pointing to bun for Node.js drop-in compatibility
+# Bun only auto-symlinks node temporarily during `bun run` (in /tmp/bun-node/);
+# these permanent symlinks make `node` and `npx` work system-wide for scripts,
+# shebangs (#!/usr/bin/env node), and tools that invoke node/npx directly.
+# Note: npm is NOT symlinked — bun's package manager uses its own CLI interface
+# (bun install, bun add, etc.) and does not emulate npm's command set when
+# invoked as "npm".
+log "Setting up Node.js compatibility symlinks for Bun..."
+BUN_BIN="${BUN_INSTALL:-$HOME/.bun}/bin"
+if [ -x "$BUN_BIN/bun" ]; then
+    ln -sf "$BUN_BIN/bun" "$BUN_BIN/node"
+    ln -sf "$BUN_BIN/bunx" "$BUN_BIN/npx"
+    log "Created node, npx symlinks in $BUN_BIN"
 else
-    log "Node.js is already installed"
+    warn "Bun binary not found at $BUN_BIN/bun, skipping Node.js compatibility symlinks"
 fi
 
 # Install GUI applications if desktop environment is available
@@ -1068,7 +1051,7 @@ zle -A {.,}history-incremental-search-backward
 
 # Remove trailing newlines if any from pasted text
 bracketed-paste() {
-  zle .$WIDGET && LBUFFER=$(echo -En $LBUFFER)
+  zle .$WIDGET && LBUFFER=$(echo -En "$LBUFFER")
 }
 zle -N bracketed-paste
 
@@ -1154,20 +1137,12 @@ export PATH=$HOME/go/bin:$PATH
 # Rust/Cargo PATH configuration
 export PATH=$HOME/.cargo/bin:$PATH
 
+# Bun PATH configuration
+export BUN_INSTALL="$HOME/.bun"
+export PATH="$BUN_INSTALL/bin:$PATH"
+
 # Python uv and local packages PATH configuration
 export PATH=$HOME/.local/bin:$PATH
-EOF
-fi
-
-# Add nvm initialization to .zshrc if nvm was installed
-if [ "${NVM_INSTALLED:-false}" = "true" ]; then
-    log "Adding nvm initialization to .zshrc..."
-    cat >> ~/.zshrc << 'EOF'
-
-# nvm (Node Version Manager) configuration
-export NVM_DIR="$HOME/.nvm"
-[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
-[ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
 EOF
 fi
 

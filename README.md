@@ -102,7 +102,7 @@ By default, the script will prompt you for confirmation on certain actions:
 
 **Notes:**
 - Backups are automatically created with timestamps before overwriting any files
-- All package installations (Docker, Go, Rust, Node.js, tools, etc.) happen automatically without prompts
+- All package installations (Docker, Go, Rust, Bun, tools, etc.) happen automatically without prompts
 
 **Force Mode (`--force` or `-f`):**
 Use this flag to run the script non-interactively, automatically answering "Yes" to all prompts. This is useful for:
@@ -139,6 +139,7 @@ After running the script:
    docker --version
    go version
    rustc --version
+   bun --version
    ```
 
 ## Usage Examples
@@ -760,7 +761,7 @@ The script creates/modifies these configuration files:
 **Runtime Environments (Conditional):**
 - `~/.cargo/env` - Rust/Cargo environment (if installed via rustup)
 - `~/.rustup/` - Rust toolchain directory (if installed via rustup)
-- `~/.nvm/` - Node Version Manager directory (if installed via nvm)
+- `~/.bun/` - Bun runtime and package manager directory
 
 ## Security Considerations
 
@@ -834,8 +835,7 @@ This section provides a comprehensive reference of all tools installed by the sc
 | **Go (golang)** | [go.dev](https://go.dev/) | [Documentation](https://go.dev/doc/) |
 | **Rust (rustc)** | [rust-lang.org](https://www.rust-lang.org/) | [Documentation](https://doc.rust-lang.org/) |
 | **Cargo** | [doc.rust-lang.org](https://doc.rust-lang.org/cargo/) | [Book](https://doc.rust-lang.org/cargo/index.html) |
-| **Node.js** | [nodejs.org](https://nodejs.org/) | [Documentation](https://nodejs.org/docs/latest/api/) |
-| **npm** | [npmjs.com](https://www.npmjs.com/) | [Documentation](https://docs.npmjs.com/) |
+| **Bun** | [bun.sh](https://bun.sh/) | [Documentation](https://bun.sh/docs) |
 
 ### Python Package Managers & Tools
 
