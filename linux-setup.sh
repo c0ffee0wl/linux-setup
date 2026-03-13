@@ -361,6 +361,7 @@ sudo apt-get install -y \
     build-essential \
     curl \
     wget \
+    unzip \
     git \
     fzf \
     tree \
