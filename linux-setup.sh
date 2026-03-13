@@ -634,6 +634,34 @@ else
     log "up tool is already installed"
 fi
 
+# Configure AppArmor to allow bwrap to create user namespaces
+# Ubuntu 24.04+ restricts unprivileged user namespaces via AppArmor by default,
+# which breaks bwrap sandboxing (used by the 'up' and 'polster' aliases)
+if command -v apparmor_parser &> /dev/null && \
+   [ -d /sys/module/apparmor ] && \
+   [ -f /proc/sys/kernel/apparmor_restrict_unprivileged_userns ] && \
+   [ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns)" = "1" ] && \
+   [ ! -f /etc/apparmor.d/bwrap ]; then
+    log "Configuring AppArmor profile for bwrap..."
+    if sudo tee /etc/apparmor.d/bwrap > /dev/null <<'APPARMOR'
+abi <abi/4.0>,
+include <tunables/global>
+
+profile bwrap /usr/bin/bwrap flags=(unconfined) {
+  userns,
+
+  include if exists <local/bwrap>
+}
+APPARMOR
+    then
+        sudo apparmor_parser -r /etc/apparmor.d/bwrap || warn "Failed to load AppArmor bwrap profile"
+    else
+        warn "Failed to write AppArmor bwrap profile"
+    fi
+else
+    log "AppArmor bwrap profile already configured or not needed"
+fi
+
 # Install Go-based tools
 install_go_tool "eget" "github.com/zyedidia/eget@latest"
 
