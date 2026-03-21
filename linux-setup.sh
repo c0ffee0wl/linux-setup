@@ -1373,12 +1373,7 @@ fi
 if is_kali_linux && [ "$NO_HACKING_TOOLS" != true ]; then
 
     # Install Project Discovery tool manager (Kali-specific tools)
-    log "Installing Project Discovery tool manager..."
-    if ! command -v pdtm &> /dev/null; then
-        go install -v github.com/projectdiscovery/pdtm/cmd/pdtm@latest
-    else
-        log "pdtm is already installed"
-    fi
+    install_go_tool "pdtm" "github.com/projectdiscovery/pdtm/cmd/pdtm@latest"
     
     # Install all Project Discovery tools
     log "Installing all Project Discovery tools..."
