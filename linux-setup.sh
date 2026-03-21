@@ -282,6 +282,9 @@ install_go_tool() {
     log "Installing ${tool_name}..."
     if ! command -v "$tool_name" &> /dev/null; then
         export PATH=$HOME/go/bin:$PATH
+        export GOPROXY="https://proxy.golang.org,off"
+        export GOSUMDB="sum.golang.org"
+        export GONOSUMCHECK=""
         go install -v "$package_path"
     else
         log "${tool_name} is already installed"
@@ -676,14 +679,8 @@ else
 fi
 
 # Install up tool
-log "Installing up tool..."
-if ! command -v up &> /dev/null; then
-    export PATH=$HOME/go/bin:$PATH
-    go install -v github.com/akavel/up@latest
-    sudo cp "$(which up)" /usr/local/bin/ 2>/dev/null || sudo cp "$HOME/go/bin/up" /usr/local/bin/
-else
-    log "up tool is already installed"
-fi
+install_go_tool "up" "github.com/akavel/up@latest"
+sudo cp "$HOME/go/bin/up" /usr/local/bin/ 2>/dev/null || true
 
 # Configure AppArmor to allow bwrap to create user namespaces
 # Ubuntu 24.04+ restricts unprivileged user namespaces via AppArmor by default,
