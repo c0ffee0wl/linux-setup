@@ -415,10 +415,20 @@ else
     log "Rust is already installed"
 fi
 
+# Cargo security hardening
+log "Configuring Cargo security hardening..."
+mkdir -p "$HOME/.cargo"
+if [ ! -f "$HOME/.cargo/config.toml" ]; then
+    cat > "$HOME/.cargo/config.toml" << 'EOF'
+[net]
+git-fetch-with-cli = true
+EOF
+fi
+
 # Install Bun (JavaScript/TypeScript runtime, package manager, drop-in Node.js replacement)
 log "Installing Bun..."
 if ! command -v bun &> /dev/null; then
-    curl -fsSL https://bun.com/install | bash
+    curl --proto '=https' --tlsv1.2 -fsSL https://bun.com/install | bash
 
     # Source bun environment for this script
     export BUN_INSTALL="$HOME/.bun"
@@ -445,6 +455,30 @@ if [ -x "$BUN_BIN/bun" ]; then
 else
     warn "Bun binary not found at $BUN_BIN/bun, skipping Node.js compatibility symlinks"
 fi
+
+#############################################################################
+# Package Manager Supply-Chain Hardening
+#############################################################################
+
+# npm hardening (protects against npm being invoked directly or installed later;
+# bun already blocks lifecycle scripts via trustedDependencies model)
+log "Configuring npm security hardening..."
+cat > "$HOME/.npmrc" << 'EOF'
+ignore-scripts=true
+save-exact=true
+audit=true
+fund=false
+min-release-age=10080
+EOF
+
+# Bun hardening
+log "Configuring Bun security hardening..."
+cat > "$HOME/.bunfig.toml" << 'EOF'
+[install]
+exact = true
+saveTextLockfile = true
+minimumReleaseAge = 604800
+EOF
 
 # Install GUI applications if desktop environment is available
 if has_desktop_environment; then
@@ -495,6 +529,23 @@ if ! command -v uv &> /dev/null; then
 else
     log "uv is already installed"
 fi
+
+# Python package manager hardening
+log "Configuring Python package manager hardening..."
+mkdir -p "$HOME/.config/uv" "$HOME/.config/pip"
+
+cat > "$HOME/.config/uv/uv.toml" << 'EOF'
+native-tls = true
+python-preference = "system"
+EOF
+
+cat > "$HOME/.config/pip/pip.conf" << 'EOF'
+[global]
+prefer-binary = true
+
+[install]
+prefer-binary = true
+EOF
 
 # Install Python tools with uv
 log "Installing Python tools with uv..."
@@ -565,7 +616,7 @@ if ! command -v docker &> /dev/null; then
 
     # Add Docker's official GPG key
     sudo install -m 0755 -d /etc/apt/keyrings
-    sudo curl -fsSL https://download.docker.com/linux/$DOCKER_DISTRO/gpg -o /etc/apt/keyrings/docker.asc
+    sudo curl --proto '=https' --tlsv1.2 -fsSL https://download.docker.com/linux/$DOCKER_DISTRO/gpg -o /etc/apt/keyrings/docker.asc
     sudo chmod a+r /etc/apt/keyrings/docker.asc
 
     # Add the repository to Apt sources
@@ -690,7 +741,7 @@ fi
 # Install sd (modern sed replacement)
 log "Installing sd..."
 if ! command -v sd &> /dev/null; then
-    sudo apt-get install -y sd || cargo install sd
+    sudo apt-get install -y sd || cargo install sd --locked
 else
     log "sd is already installed"
 fi
@@ -1134,7 +1185,7 @@ bindkey "${ZSH_UP_KEYBINDING:-^P}" zle-upify
 alias up="$UPCOMMAND"
 alias polster='bwrap --die-with-parent --tmpfs /tmp --ro-bind /usr /usr --ro-bind /bin /bin --ro-bind /lib /lib --ro-bind /lib64 /lib64 --ro-bind /sbin /sbin --ro-bind /etc /etc --dev /dev --proc /proc --tmpfs /var --tmpfs /run --dir /run/user/$UID --tmpfs /usr/share --unshare-all --clearenv'
 
-alias upgrade-all='sudo apt-get update && sudo apt-get dist-upgrade; pipx upgrade-all; uv tool upgrade --all'
+alias upgrade-all='sudo apt-get update && sudo apt-get dist-upgrade; pipx upgrade-all'
 alias fd='fdfind'
 alias pbcopy='xsel --clipboard --input'
 alias pbpaste='xsel --clipboard --output'
@@ -1431,6 +1482,11 @@ update_profile_export "AZURE_CORE_COLLECT_TELEMETRY" "0"
 update_profile_export "PYPI_DISABLE_TELEMETRY" "1"
 update_profile_export "UV_NO_TELEMETRY" "1"
 update_profile_export "SCARF_ANALYTICS" "false"
+
+# Go module supply-chain hardening
+update_profile_export "GOPROXY" "https://proxy.golang.org,off"
+update_profile_export "GOSUMDB" "sum.golang.org"
+update_profile_export "GONOSUMCHECK" ""
 
 # Ensure ZSH sources ~/.profile on non-Kali systems
 ensure_zprofile_sources_profile

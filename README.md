@@ -769,6 +769,14 @@ The script creates/modifies these configuration files:
 - **User verification**: Prompts before making system changes
 - **Sandboxed tools**: Includes bubblewrap for command isolation
 - **Docker security**: User added to docker group (requires logout)
+- **Supply-chain hardening**:
+  - npm: `ignore-scripts=true`, `save-exact=true`, 7-day `min-release-age` quarantine
+  - Bun: exact version pinning, 7-day `minimumReleaseAge`, text lockfiles
+  - pip: `prefer-binary=true` (avoids running untrusted `setup.py`)
+  - uv: `native-tls` (system CA store), system Python preference
+  - Go: `GOPROXY=proxy.golang.org,off`, `GOSUMDB=sum.golang.org` (checksum verification)
+  - Cargo: `git-fetch-with-cli` (uses system git instead of libgit2), `--locked` on all installs
+  - curl: `--proto '=https' --tlsv1.2` enforced on all remote script downloads
 
 ## Compatibility
 
