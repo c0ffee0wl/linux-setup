@@ -537,7 +537,7 @@ if ! command -v uv &> /dev/null; then
     pipx install uv
 else
     log "Updating uv..."
-    uv self update
+    pipx upgrade uv 2>/dev/null || pipx install --force uv
 fi
 
 # Python package manager hardening
