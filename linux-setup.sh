@@ -279,16 +279,16 @@ install_go_tool() {
     local tool_name="$1"
     local package_path="$2"
 
-    log "Installing ${tool_name}..."
     if ! command -v "$tool_name" &> /dev/null; then
-        export PATH=$HOME/go/bin:$PATH
-        export GOPROXY="https://proxy.golang.org,off"
-        export GOSUMDB="sum.golang.org"
-        export GONOSUMCHECK=""
-        go install -v "$package_path"
+        log "Installing ${tool_name}..."
     else
-        log "${tool_name} is already installed"
+        log "Updating ${tool_name}..."
     fi
+    export PATH=$HOME/go/bin:$PATH
+    export GOPROXY="https://proxy.golang.org,off"
+    export GOSUMDB="sum.golang.org"
+    export GONOSUMCHECK=""
+    go install -v "$package_path"
 }
 
 # Install Rust via rustup
@@ -415,7 +415,12 @@ if ! command -v cargo &> /dev/null; then
         install_rust_via_rustup
     fi
 else
-    log "Rust is already installed"
+    if command -v rustup &> /dev/null; then
+        log "Updating Rust via rustup..."
+        rustup update stable
+    else
+        log "Rust is already installed (apt-managed, updated via dist-upgrade)"
+    fi
 fi
 
 # Cargo security hardening
@@ -439,7 +444,8 @@ if ! command -v bun &> /dev/null; then
 
     log "Bun installed successfully"
 else
-    log "Bun is already installed"
+    log "Updating Bun..."
+    bun upgrade
 fi
 
 # Create node/npx symlinks pointing to bun for Node.js drop-in compatibility
@@ -530,7 +536,8 @@ export PATH=$HOME/.local/bin:$PATH
 if ! command -v uv &> /dev/null; then
     pipx install uv
 else
-    log "uv is already installed"
+    log "Updating uv..."
+    pipx upgrade uv
 fi
 
 # Python package manager hardening
@@ -727,20 +734,25 @@ else
 fi
 
 
-# Install zoxide (smarter cd)
-log "Installing zoxide..."
+# Install or update zoxide (smarter cd)
 if ! command -v zoxide &> /dev/null; then
-    cargo install zoxide --locked
+    log "Installing zoxide..."
 else
-    log "zoxide is already installed"
+    log "Checking zoxide for updates..."
 fi
+cargo install zoxide --locked
 
-# Install sd (modern sed replacement)
-log "Installing sd..."
+# Install or update sd (modern sed replacement)
 if ! command -v sd &> /dev/null; then
+    log "Installing sd..."
     sudo apt-get install -y sd || cargo install sd --locked
 else
-    log "sd is already installed"
+    if [ -f "$HOME/.cargo/bin/sd" ]; then
+        log "Checking sd for updates..."
+        cargo install sd --locked
+    else
+        log "sd is already installed (apt-managed, updated via dist-upgrade)"
+    fi
 fi
 
 # Disable screensaver and power management
