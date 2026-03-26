@@ -59,6 +59,10 @@ EOF
     exit 0
 }
 
+# Preserve original args before parsing consumes them via shift.
+# Used by self-update (exec "$0") to re-run with the same flags.
+ORIGINAL_ARGS=("$@")
+
 # Parse command-line arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -337,7 +341,7 @@ if git rev-parse --git-dir > /dev/null 2>&1; then
         log "Updates found! Pulling latest changes..."
         git pull --ff-only
         log "Re-executing updated script..."
-        exec "$0" "$@"
+        exec "$0" "${ORIGINAL_ARGS[@]}"
         exit 0
     else
         log "Script is up to date"
