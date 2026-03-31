@@ -8,6 +8,7 @@ set -eo pipefail
 VERSION="1.3"
 FORCE_MODE=false
 NO_MODE=false
+NO_HACKING_TOOLS=false
 
 # Colors for output
 RED='\033[0;31m'
@@ -252,7 +253,7 @@ has_desktop_environment() {
     fi
 
     # Check for common DE packages (Kali uses XFCE)
-    if dpkg -l 2>/dev/null | grep -qE '^ii\s+(xfce4|gnome-shell|kde-plasma-desktop|plasma-desktop|lxde-core)' || false; then
+    if dpkg -l 2>/dev/null | grep -qE '^ii\s+(xfce4|gnome-shell|kde-plasma-desktop|plasma-desktop|lxde-core)'; then
         return 0
     fi
 
@@ -341,8 +342,7 @@ if git rev-parse --git-dir > /dev/null 2>&1; then
         log "Updates found! Pulling latest changes..."
         git pull --ff-only
         log "Re-executing updated script..."
-        exec "$0" "${ORIGINAL_ARGS[@]}"
-        exit 0
+        exec "$0" "${ORIGINAL_ARGS[@]}" || error "Failed to re-execute updated script"
     else
         log "Script is up to date"
     fi
@@ -585,8 +585,8 @@ if ! command -v docker &> /dev/null; then
 
         # Validate against supported Ubuntu versions
         case "$DOCKER_CODENAME" in
-            oracular|plucky|noble|jammy)
-                # Officially supported Ubuntu versions (25.10, 25.04, 24.04 LTS, 22.04 LTS)
+            questing|noble|jammy)
+                # Officially supported Ubuntu versions (25.10, 24.04 LTS, 22.04 LTS)
                 ;;
             *)
                 log "Warning: Ubuntu codename '$DOCKER_CODENAME' is not officially supported by Docker. Falling back to Trixie."
@@ -664,10 +664,10 @@ fi
 if has_desktop_environment; then
     log "Installing Visual Studio Code..."
     if ! command -v code &> /dev/null; then
-        sudo apt-get install -y wget gpg
-        wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > microsoft.gpg
-        sudo install -D -o root -g root -m 644 microsoft.gpg /usr/share/keyrings/microsoft.gpg
-        rm -f microsoft.gpg
+        sudo apt-get install -y gpg
+        curl --proto '=https' --tlsv1.2 -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > /tmp/microsoft.gpg
+        sudo install -m 644 /tmp/microsoft.gpg /usr/share/keyrings/microsoft.gpg
+        rm -f /tmp/microsoft.gpg
         
         # Create VSCode sources file
         sudo tee /etc/apt/sources.list.d/vscode.sources > /dev/null << 'EOF'
@@ -1374,7 +1374,7 @@ EOF
     fi
 
     if [[ ! -f ~/.config/terminator/plugins/tab_numbers.py ]]; then
-        if wget -O ~/.config/terminator/plugins/tab_numbers.py https://raw.githubusercontent.com/c0ffee0wl/terminator-tab-numbers-plugin/main/tab_numbers.py; then
+        if curl --proto '=https' --tlsv1.2 -fsSL -o ~/.config/terminator/plugins/tab_numbers.py https://raw.githubusercontent.com/c0ffee0wl/terminator-tab-numbers-plugin/main/tab_numbers.py; then
             log "Terminator tab numbers plugin installed successfully"
         else
             warn "Failed to download Terminator tab numbers plugin"
@@ -1431,7 +1431,7 @@ fi
 log "Installing ufw-docker..."
 if ! command -v ufw-docker &> /dev/null; then
     # Download UFW-Docker script
-    sudo wget -O /usr/local/bin/ufw-docker https://github.com/chaifeng/ufw-docker/raw/master/ufw-docker
+    sudo curl --proto '=https' --tlsv1.2 -fsSL -o /usr/local/bin/ufw-docker https://github.com/chaifeng/ufw-docker/raw/master/ufw-docker
     sudo chmod +x /usr/local/bin/ufw-docker
     
     log "ufw-docker installed successfully"
