@@ -1261,11 +1261,11 @@ bindkey '\C-r' hstr_no_tiocsti
 export HSTR_TIOCSTI=n
 
 # https://github.com/akavel/up/ https://github.com/akavel/up/issues/44
-UPCOMMAND="bwrap --die-with-parent --ro-bind / / --bind /tmp /tmp --dev /dev --proc /proc --tmpfs /var --tmpfs /run --dir /run/user/$UID --unshare-pid --unshare-cgroup --unshare-ipc --cap-drop ALL /usr/local/bin/up"
+UPCOMMAND="bwrap --die-with-parent --ro-bind / / --bind /tmp /tmp --dev /dev --proc /proc --tmpfs /var --tmpfs /run --dir /run/user/$UID --unshare-pid --unshare-cgroup --unshare-ipc --unshare-net --cap-drop ALL /usr/local/bin/up"
 zle-upify() {
     local args=""
 
-    if [[ -n "$ZSH_UP_UNSAFE_FULL_THROTTLE" ]]; then 
+    if [[ -n "$ZSH_UP_UNSAFE_FULL_THROTTLE" ]]; then
         args="$args --unsafe-full-throttle"
     fi
 
