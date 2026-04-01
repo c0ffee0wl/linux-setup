@@ -91,6 +91,9 @@ The script supports the following command-line options:
 
 # Skip hacking tools even on Kali Linux
 ./linux-setup.sh --no-hacking-tools
+
+# Apply only supply-chain hardening configs (no package installs, no shell changes)
+./linux-setup.sh --harden-only
 ```
 
 **Interactive Mode (default):**
@@ -120,6 +123,12 @@ Use this flag to skip installation of hacking/pentest tools even when running on
 - Project Discovery tools (pdtm and all tools it installs)
 - BloodHoundAnalyzer
 - bbot, NetExec
+
+**Harden Only (`--harden-only`):**
+Use this flag to apply only supply-chain hardening configurations without installing any packages or changing shell/terminal settings. This writes package manager configs (npm, Bun, Cargo, uv, pip), system-level fallback configs, telemetry opt-outs, and Go module hardening environment variables. Useful for:
+- Hardening existing systems without a full setup run
+- Applying hardening to systems where tools were installed manually
+- Refreshing hardening configs after dotfile changes
 
 ### What the script does:
 1. **System verification**: Checks OS compatibility and user privileges
@@ -753,6 +762,18 @@ The script creates/modifies these configuration files:
 - `~/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-power-manager.xml` - Power management settings
 - `~/.config/xfce4/xfconf/xfce-perchannel-xml/keyboard-layout.xml` - Keyboard layout (German)
 
+**Supply-Chain Hardening (user-level):**
+- `~/.npmrc` - npm security hardening (ignore-scripts, save-exact, min-release-age)
+- `~/.bunfig.toml` - Bun security hardening (exact versions, minimum release age)
+- `~/.cargo/config.toml` - Cargo security hardening (git-fetch-with-cli)
+- `~/.config/uv/uv.toml` - uv security hardening (exclude-newer, native-tls)
+- `~/.config/pip/pip.conf` - pip security hardening (prefer-binary)
+
+**Supply-Chain Hardening (system-level fallbacks):**
+- `/usr/local/etc/npmrc` - npm fallback (mirrors user config)
+- `/etc/uv/uv.toml` - uv fallback (mirrors user config)
+- `/etc/pip.conf` - pip fallback (mirrors user config)
+
 **System Configuration:**
 - `/etc/systemd/resolved.conf.d/disable-stub.conf` - DNS stub listener configuration
 - `/etc/apt/sources.list.d/docker.list` - Docker CE repository
@@ -769,14 +790,15 @@ The script creates/modifies these configuration files:
 - **User verification**: Prompts before making system changes
 - **Sandboxed tools**: Includes bubblewrap for command isolation
 - **Docker security**: User added to docker group (requires logout)
-- **Supply-chain hardening**:
+- **Supply-chain hardening** (all configs consolidated in `apply_supply_chain_hardening()`, runnable standalone via `--harden-only`):
   - npm: `ignore-scripts=true`, `save-exact=true`, 7-day `min-release-age` quarantine
   - Bun: exact version pinning, 7-day `minimumReleaseAge`, text lockfiles
   - pip: `prefer-binary=true` (avoids running untrusted `setup.py`)
-  - uv: `native-tls` (system CA store), system Python preference
+  - uv: `exclude-newer` 1-week quarantine, `native-tls` (system CA store), system Python preference
   - Go: `GOPROXY=proxy.golang.org,off`, `GOSUMDB=sum.golang.org` (checksum verification)
   - Cargo: `git-fetch-with-cli` (uses system git instead of libgit2), `--locked` on all installs
   - curl: `--proto '=https' --tlsv1.2` enforced on all remote script downloads
+  - System-level fallback configs (`/usr/local/etc/npmrc`, `/etc/pip.conf`, `/etc/uv/uv.toml`) for defence-in-depth
 
 ## Compatibility
 

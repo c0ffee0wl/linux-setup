@@ -9,6 +9,7 @@ VERSION="1.3"
 FORCE_MODE=false
 NO_MODE=false
 NO_HACKING_TOOLS=false
+HARDEN_ONLY=false
 
 # Colors for output
 RED='\033[0;31m'
@@ -30,6 +31,7 @@ Options:
   --yes, -y            Same as --force
   --no, -n             Run in non-interactive mode, automatically answering 'No' to all prompts
   --no-hacking-tools   Skip installation of hacking/pentest tools (even on Kali)
+  --harden-only        Apply only supply-chain hardening configs (no installs, no shell changes)
   --help, -h           Display this help message and exit
 
 Interactive Mode (default):
@@ -50,11 +52,18 @@ No Mode (--no, -n):
   - Installing packages without overwriting existing configurations
   - Running the script but skipping optional configurations
 
+Harden-Only Mode (--harden-only):
+  Applies supply-chain hardening configs without installing any packages.
+  Writes package manager configs (npm, Bun, Cargo, uv, pip), system-level
+  fallbacks, telemetry opt-outs, and Go module hardening env vars.
+  Useful for hardening existing systems without a full setup run.
+
 Examples:
   $0              # Interactive installation
   $0 --force      # Non-interactive installation (answer Yes to all)
   $0 --yes        # Same as --force
   $0 --no         # Non-interactive installation (answer No to all)
+  $0 --harden-only  # Apply supply-chain hardening configs only
 
 EOF
     exit 0
@@ -77,6 +86,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --no-hacking-tools)
             NO_HACKING_TOOLS=true
+            shift
+            ;;
+        --harden-only)
+            HARDEN_ONLY=true
             shift
             ;;
         --help|-h)
@@ -236,6 +249,124 @@ ensure_zprofile_sources_profile() {
     fi
 }
 
+# Apply all supply-chain hardening configurations
+# Writes package manager configs (user-level + system-level fallbacks),
+# telemetry opt-outs, and Go module hardening environment variables.
+# Safe to call on systems where tools are not yet installed.
+apply_supply_chain_hardening() {
+    log "Applying supply-chain hardening configurations..."
+
+    # --- npm hardening (user-level) ---
+    # Protects against npm being invoked directly or installed later;
+    # bun already blocks lifecycle scripts via trustedDependencies model
+    log "Configuring npm security hardening..."
+    cat > "$HOME/.npmrc" << 'EOF'
+ignore-scripts=true
+save-exact=true
+audit=true
+fund=false
+min-release-age=10080
+EOF
+
+    # --- Bun hardening (user-level) ---
+    log "Configuring Bun security hardening..."
+    cat > "$HOME/.bunfig.toml" << 'EOF'
+[install]
+exact = true
+saveTextLockfile = true
+minimumReleaseAge = 604800
+EOF
+
+    # --- Cargo hardening (user-level, preserve existing) ---
+    log "Configuring Cargo security hardening..."
+    mkdir -p "$HOME/.cargo"
+    if [ ! -f "$HOME/.cargo/config.toml" ]; then
+        cat > "$HOME/.cargo/config.toml" << 'EOF'
+[net]
+git-fetch-with-cli = true
+EOF
+    fi
+
+    # --- Python package manager hardening (user-level) ---
+    log "Configuring Python package manager hardening..."
+    mkdir -p "$HOME/.config/uv" "$HOME/.config/pip"
+
+    cat > "$HOME/.config/uv/uv.toml" << 'EOF'
+exclude-newer = "1 week"
+native-tls = true
+python-preference = "system"
+EOF
+
+    cat > "$HOME/.config/pip/pip.conf" << 'EOF'
+[global]
+prefer-binary = true
+
+[install]
+prefer-binary = true
+EOF
+
+    # --- System-level fallback configs (defence-in-depth) ---
+    # If user deletes their dotfiles, system defaults still enforce hardening
+    log "Deploying system-level fallback configs..."
+    if sudo -n true 2>/dev/null; then
+        sudo mkdir -p /usr/local/etc /etc/uv
+
+        sudo tee /usr/local/etc/npmrc > /dev/null << 'EOF'
+ignore-scripts=true
+save-exact=true
+audit=true
+fund=false
+min-release-age=10080
+EOF
+
+        sudo tee /etc/uv/uv.toml > /dev/null << 'EOF'
+exclude-newer = "1 week"
+native-tls = true
+python-preference = "system"
+EOF
+
+        sudo tee /etc/pip.conf > /dev/null << 'EOF'
+[global]
+prefer-binary = true
+
+[install]
+prefer-binary = true
+EOF
+
+        log "System-level fallback configs deployed"
+    else
+        warn "Could not obtain passwordless sudo - skipping system-level fallback configs"
+    fi
+
+    # --- Telemetry/Privacy opt-outs ---
+    log "Setting privacy/telemetry environment defaults..."
+
+    # Universal opt-out signal (proposed standard)
+    update_profile_export "DO_NOT_TRACK" "1"
+
+    # VS Code / .NET / PowerShell / Azure
+    update_profile_export "VSCODE_TELEMETRY_DISABLE" "1"
+    update_profile_export "VSCODE_CRASH_REPORTER_DISABLE" "1"
+    update_profile_export "DOTNET_CLI_TELEMETRY_OPTOUT" "1"
+    update_profile_export "POWERSHELL_TELEMETRY_OPTOUT" "1"
+    update_profile_export "AZURE_CORE_COLLECT_TELEMETRY" "0"
+
+    # Python packaging tools
+    update_profile_export "PYPI_DISABLE_TELEMETRY" "1"
+    update_profile_export "UV_NO_TELEMETRY" "1"
+    update_profile_export "SCARF_ANALYTICS" "false"
+
+    # Go module supply-chain hardening
+    update_profile_export "GOPROXY" "https://proxy.golang.org,off"
+    update_profile_export "GOSUMDB" "sum.golang.org"
+    update_profile_export "GONOSUMCHECK" ""
+
+    # Ensure ZSH sources ~/.profile on non-Kali systems
+    ensure_zprofile_sources_profile
+
+    log "Supply-chain hardening complete"
+}
+
 # Check if desktop environment is available
 has_desktop_environment() {
     # Check for desktop session files (most reliable)
@@ -350,6 +481,14 @@ else
     warn "Not running from a git repository. Self-update disabled."
 fi
 
+# --harden-only: apply supply-chain hardening and exit (no installs)
+if [[ "$HARDEN_ONLY" == "true" ]]; then
+    log "Running in harden-only mode (no package installs, no shell changes)"
+    apply_supply_chain_hardening
+    log "Harden-only mode complete!"
+    exit 0
+fi
+
 #############################################################################
 # PHASE 1: System Setup
 #############################################################################
@@ -427,16 +566,6 @@ else
     fi
 fi
 
-# Cargo security hardening
-log "Configuring Cargo security hardening..."
-mkdir -p "$HOME/.cargo"
-if [ ! -f "$HOME/.cargo/config.toml" ]; then
-    cat > "$HOME/.cargo/config.toml" << 'EOF'
-[net]
-git-fetch-with-cli = true
-EOF
-fi
-
 # Install Bun (JavaScript/TypeScript runtime, package manager, drop-in Node.js replacement)
 log "Installing Bun..."
 if ! command -v bun &> /dev/null; then
@@ -473,25 +602,7 @@ fi
 # Package Manager Supply-Chain Hardening
 #############################################################################
 
-# npm hardening (protects against npm being invoked directly or installed later;
-# bun already blocks lifecycle scripts via trustedDependencies model)
-log "Configuring npm security hardening..."
-cat > "$HOME/.npmrc" << 'EOF'
-ignore-scripts=true
-save-exact=true
-audit=true
-fund=false
-min-release-age=10080
-EOF
-
-# Bun hardening
-log "Configuring Bun security hardening..."
-cat > "$HOME/.bunfig.toml" << 'EOF'
-[install]
-exact = true
-saveTextLockfile = true
-minimumReleaseAge = 604800
-EOF
+apply_supply_chain_hardening
 
 # Install GUI applications if desktop environment is available
 if has_desktop_environment; then
@@ -543,23 +654,6 @@ else
     log "Updating uv..."
     pipx upgrade uv 2>/dev/null || pipx install --force uv
 fi
-
-# Python package manager hardening
-log "Configuring Python package manager hardening..."
-mkdir -p "$HOME/.config/uv" "$HOME/.config/pip"
-
-cat > "$HOME/.config/uv/uv.toml" << 'EOF'
-native-tls = true
-python-preference = "system"
-EOF
-
-cat > "$HOME/.config/pip/pip.conf" << 'EOF'
-[global]
-prefer-binary = true
-
-[install]
-prefer-binary = true
-EOF
 
 # Install Python tools with uv
 log "Installing Python tools with uv..."
@@ -1467,39 +1561,6 @@ if systemctl is-active --quiet avahi-daemon 2>/dev/null; then
 else
     log "avahi-daemon not active, skipping configuration"
 fi
-
-#############################################################################
-# Privacy/Telemetry Defaults
-#############################################################################
-
-# Set telemetry/privacy defaults for dev tools
-# These apply even if tools are installed manually later
-log "Setting privacy/telemetry environment defaults..."
-
-# Universal opt-out signal (proposed standard)
-update_profile_export "DO_NOT_TRACK" "1"
-
-# VS Code / .NET / PowerShell / Azure
-update_profile_export "VSCODE_TELEMETRY_DISABLE" "1"
-update_profile_export "VSCODE_CRASH_REPORTER_DISABLE" "1"
-update_profile_export "DOTNET_CLI_TELEMETRY_OPTOUT" "1"
-update_profile_export "POWERSHELL_TELEMETRY_OPTOUT" "1"
-update_profile_export "AZURE_CORE_COLLECT_TELEMETRY" "0"
-
-# Python packaging tools
-update_profile_export "PYPI_DISABLE_TELEMETRY" "1"
-update_profile_export "UV_NO_TELEMETRY" "1"
-update_profile_export "SCARF_ANALYTICS" "false"
-
-# Go module supply-chain hardening
-update_profile_export "GOPROXY" "https://proxy.golang.org,off"
-update_profile_export "GOSUMDB" "sum.golang.org"
-update_profile_export "GONOSUMCHECK" ""
-
-# Ensure ZSH sources ~/.profile on non-Kali systems
-ensure_zprofile_sources_profile
-
-log "Privacy defaults configured in ~/.profile"
 
 # Final cleanup
 log "Performing final cleanup..."
