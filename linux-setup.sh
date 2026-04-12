@@ -836,20 +836,20 @@ else
 fi
 
 # Install Go-based tools
-install_go_tool "eget" "github.com/zyedidia/eget@latest"
-install_go_tool "yq" "github.com/mikefarah/yq/v4@latest"
-
-# lazygit and lazydocker require Go 1.24+
 GO_VERSION=$(get_go_version)
 MINIMUM_GO_VERSION=124  # Go 1.24
 
+install_go_tool "eget" "github.com/zyedidia/eget@latest"
+
+# lazygit, lazydocker, gitsnip and yq require Go 1.24+
 if [ "$GO_VERSION" -ge "$MINIMUM_GO_VERSION" ]; then
+    install_go_tool "yq" "github.com/mikefarah/yq/v4@latest"
     install_go_tool "lazygit" "github.com/jesseduffield/lazygit@latest"
     install_go_tool "lazydocker" "github.com/jesseduffield/lazydocker@latest"
     install_go_tool "gitsnip" "github.com/dagimg-dot/gitsnip/cmd/gitsnip@latest"
 else
     GO_VERSION_STR=$(go version 2>/dev/null | grep -oP 'go\K[0-9]+\.[0-9]+' | head -1 || true)
-    warn "Skipping lazygit, lazydocker and gitsnip - require Go 1.24+, found Go ${GO_VERSION_STR:-unknown}"
+    warn "Skipping yq, lazygit, lazydocker and gitsnip - require Go 1.24+, found Go ${GO_VERSION_STR:-unknown}"
 fi
 
 
