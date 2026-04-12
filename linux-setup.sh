@@ -427,6 +427,26 @@ install_go_tool() {
     go install -v "$package_path"
 }
 
+# Install Cargo tool via apt with cargo fallback
+# Usage: install_cargo_tool <binary-name> <apt-package> <cargo-crate>
+install_cargo_tool() {
+    local bin_name="$1"
+    local apt_pkg="$2"
+    local cargo_crate="$3"
+
+    if ! command -v "$bin_name" &> /dev/null; then
+        log "Installing ${bin_name}..."
+        sudo apt-get install -y "$apt_pkg" || cargo install "$cargo_crate" --locked
+    else
+        if [ -f "$HOME/.cargo/bin/$bin_name" ]; then
+            log "Checking ${bin_name} for updates..."
+            cargo install "$cargo_crate" --locked
+        else
+            log "${bin_name} is already installed (apt-managed, updated via dist-upgrade)"
+        fi
+    fi
+}
+
 # Install Rust via rustup
 install_rust_via_rustup() {
     log "Installing Rust via rustup (official Rust installer)..."
@@ -817,6 +837,7 @@ fi
 
 # Install Go-based tools
 install_go_tool "eget" "github.com/zyedidia/eget@latest"
+install_go_tool "yq" "github.com/mikefarah/yq/v4@latest"
 
 # lazygit and lazydocker require Go 1.24+
 GO_VERSION=$(get_go_version)
@@ -840,17 +861,16 @@ else
 fi
 cargo install zoxide --locked
 
-# Install or update sd (modern sed replacement)
-if ! command -v sd &> /dev/null; then
-    log "Installing sd..."
-    sudo apt-get install -y sd || cargo install sd --locked
-else
-    if [ -f "$HOME/.cargo/bin/sd" ]; then
-        log "Checking sd for updates..."
-        cargo install sd --locked
-    else
-        log "sd is already installed (apt-managed, updated via dist-upgrade)"
-    fi
+install_cargo_tool "sd" "sd" "sd"
+install_cargo_tool "delta" "git-delta" "git-delta"
+
+# Configure delta as git pager
+if command -v delta &> /dev/null; then
+    log "Configuring delta as git pager..."
+    git config --global core.pager "delta"
+    git config --global interactive.diffFilter "delta --color-only"
+    git config --global delta.navigate "true"
+    git config --global merge.conflictstyle "zdiff3"
 fi
 
 # Disable screensaver and power management
@@ -1299,6 +1319,7 @@ alias pbpaste='xsel --clipboard --output'
 alias bat='batcat --theme=Coldark-Cold'
 alias cat='batcat --theme=Coldark-Cold --paging=never'
 
+# Trailing space lets zsh expand aliases after sudo (e.g., sudo ll -> sudo ls -l)
 alias sudo='sudo '
 alias sudp='sudo '
 

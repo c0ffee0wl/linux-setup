@@ -16,11 +16,13 @@
   - [Shell Operations Previewed in Ultimate Plumber](#shell-operations-previewed-in-ultimate-plumber)
   - [ripgrep (rg) - Fast Recursive Search](#ripgrep-rg---fast-recursive-search)
   - [sd - Search & Displace (sed replacement)](#sd---search--displace-sed-replacement)
+  - [delta - Git Diff Viewer](#delta---git-diff-viewer)
   - [fd - Fast File Finder](#fd---fast-file-finder)
   - [moreutils - Advanced Unix Tools](#moreutils---advanced-unix-tools)
   - [tldr - Simplified Command Examples](#tldr---simplified-command-examples)
   - [bat - Syntax-Highlighted File Viewer](#bat---syntax-highlighted-file-viewer)
   - [jq - JSON Processor](#jq---json-processor)
+  - [yq - YAML/TOML/XML Processor](#yq---yamltomlxml-processor)
   - [Arrow Key History Search](#arrow-key-history-search)
   - [hstr - Enhanced History Search](#hstr---enhanced-history-search)
   - [unp - Universal Unpacker](#unp---universal-unpacker)
@@ -250,6 +252,21 @@ cat ~/users.txt | sd '\n' ',' | tail
 echo "sample with /path/" | sd '.*(/.*/)' '$1'
 ```
 
+### [delta](https://github.com/dandavison/delta) - Git Diff Viewer
+
+`delta` is configured as the default git pager for syntax-highlighted diffs:
+
+```bash
+# View git diff with syntax highlighting (automatic - just use git as normal)
+git diff
+
+# Side-by-side view
+git -c delta.side-by-side=true diff
+
+# View git log with diff
+git log -p
+```
+
 ### [fd](https://github.com/sharkdp/fd) - Fast File Finder
 
 ```bash
@@ -379,6 +396,30 @@ jq '.users[].email' data.json
 
 # Combine with other tools
 cat package.json | jq '.dependencies' | grep -i react
+```
+
+### [yq](https://github.com/mikefarah/yq) - YAML/TOML/XML Processor
+
+`yq` is like `jq` but for YAML, TOML, XML, and other formats:
+
+```bash
+# Pretty-print YAML
+yq '.' config.yaml
+
+# Extract a field
+yq '.services.web.image' docker-compose.yml
+
+# Convert YAML to JSON
+yq -o=json '.' config.yaml
+
+# Convert JSON to YAML
+yq -P '.' data.json
+
+# Update a value in-place
+yq -i '.version = "2.0"' config.yaml
+
+# Read TOML files
+yq -p=toml '.' pyproject.toml
 ```
 
 ### Arrow Key History Search
@@ -845,6 +886,8 @@ This section provides a comprehensive reference of all tools installed by the sc
 | **tldr** | [GitHub](https://github.com/tldr-pages/tldr) | [Documentation](https://github.com/tldr-pages/tldr#how-do-i-use-it) |
 | **eget** | [GitHub](https://github.com/zyedidia/eget) | [Documentation](https://github.com/zyedidia/eget/blob/master/DOCS.md) |
 | **gitsnip** | [GitHub](https://github.com/dagimg-dot/gitsnip) | [README](https://github.com/dagimg-dot/gitsnip#readme) |
+| **delta** | [GitHub](https://github.com/dandavison/delta) | [Manual](https://dandavison.github.io/delta/) |
+| **yq** | [GitHub](https://github.com/mikefarah/yq) | [Documentation](https://mikefarah.gitbook.io/yq) |
 
 ### Shell & Terminal
 
