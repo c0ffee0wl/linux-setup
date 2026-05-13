@@ -5,7 +5,7 @@
 
 set -eo pipefail
 
-VERSION="1.3"
+VERSION="1.4"
 FORCE_MODE=false
 NO_MODE=false
 NO_HACKING_TOOLS=false
@@ -394,22 +394,21 @@ has_desktop_environment() {
     return 1
 }
 
-# Get installed Go version as comparable number
-# Returns version in format: 1.19 -> 119, 1.24 -> 124
+# Convert version string to comparable number: "1.85" -> 185, "" -> 0
+version_to_num() {
+    local v="${1:-0.0}"
+    [ -z "$v" ] && v="0.0"
+    echo "$v" | awk -F. '{print ($1 * 100) + $2}'
+}
+
+# Get installed Go version as comparable number (e.g., 1.24 -> 124, missing -> 0)
 get_go_version() {
     if ! command -v go &> /dev/null; then
         echo "0"
         return
     fi
-
     local go_version=$(go version 2>/dev/null | grep -oP 'go\K[0-9]+\.[0-9]+' | head -1 || true)
-    if [ -z "$go_version" ]; then
-        echo "0"
-        return
-    fi
-
-    # Convert to comparable number (e.g., "1.19" -> 119, "1.24" -> 124)
-    echo "$go_version" | awk -F. '{print ($1 * 100) + $2}'
+    version_to_num "$go_version"
 }
 
 # Install Go tool
@@ -559,31 +558,31 @@ sudo apt-get install -y \
 # Install Rust - either from repo (if >= 1.85) or via rustup
 log "Checking Rust version in repositories..."
 REPO_RUST_VERSION=$(apt-cache policy rustc 2>/dev/null | grep -oP 'Candidate:\s*\K[0-9]+\.[0-9]+' | head -1 || true)
-
 if [ -z "$REPO_RUST_VERSION" ]; then
     REPO_RUST_VERSION="0.0"
     warn "Could not determine repository Rust version"
 fi
-
-# Convert version to comparable number (e.g., "1.85" -> 185)
-REPO_RUST_VERSION_NUM=$(echo "$REPO_RUST_VERSION" | awk -F. '{print ($1 * 100) + $2}')
+REPO_RUST_VERSION_NUM=$(version_to_num "$REPO_RUST_VERSION")
 MINIMUM_RUST_VERSION=185  # Rust 1.85 minimum for modern tools
 
 log "Repository has Rust version: $REPO_RUST_VERSION (numeric: $REPO_RUST_VERSION_NUM, minimum required: $MINIMUM_RUST_VERSION)"
 
-if ! command -v cargo &> /dev/null; then
-    # Rust not installed - choose installation method based on repo version
-    if [ "$REPO_RUST_VERSION_NUM" -ge "$MINIMUM_RUST_VERSION" ]; then
-        log "Installing Rust from repositories (version $REPO_RUST_VERSION)..."
-        sudo apt-get install -y cargo rustc
-    else
-        log "Repository version $REPO_RUST_VERSION is < 1.85, installing Rust via rustup..."
-        install_rust_via_rustup
-    fi
+if ! command -v cargo &> /dev/null && [ "$REPO_RUST_VERSION_NUM" -ge "$MINIMUM_RUST_VERSION" ]; then
+    log "Installing Rust from repositories (version $REPO_RUST_VERSION)..."
+    sudo apt-get install -y cargo rustc
+elif ! command -v cargo &> /dev/null; then
+    log "Repository version $REPO_RUST_VERSION is below required $MINIMUM_RUST_VERSION, installing Rust via rustup..."
+    install_rust_via_rustup
+elif command -v rustup &> /dev/null; then
+    log "Updating Rust via rustup..."
+    rustup update stable
 else
-    if command -v rustup &> /dev/null; then
-        log "Updating Rust via rustup..."
-        rustup update stable
+    INSTALLED_RUST_VERSION=$(rustc --version 2>/dev/null | grep -oP '[0-9]+\.[0-9]+' | head -1 || true)
+    INSTALLED_RUST_VERSION_NUM=$(version_to_num "$INSTALLED_RUST_VERSION")
+    log "Installed Rust version: ${INSTALLED_RUST_VERSION:-unknown} (numeric: $INSTALLED_RUST_VERSION_NUM, minimum required: $MINIMUM_RUST_VERSION)"
+    if [ "$INSTALLED_RUST_VERSION_NUM" -lt "$MINIMUM_RUST_VERSION" ]; then
+        log "Installed Rust is below required $MINIMUM_RUST_VERSION, installing rustup for a newer toolchain..."
+        install_rust_via_rustup
     else
         log "Rust is already installed (apt-managed, updated via dist-upgrade)"
     fi
