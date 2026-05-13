@@ -293,7 +293,7 @@ EOF
 
     cat > "$HOME/.config/uv/uv.toml" << 'EOF'
 exclude-newer = "1 week"
-native-tls = true
+system-certs = true
 python-preference = "system"
 EOF
 
@@ -321,7 +321,7 @@ EOF
 
         sudo tee /etc/uv/uv.toml > /dev/null << 'EOF'
 exclude-newer = "1 week"
-native-tls = true
+system-certs = true
 python-preference = "system"
 EOF
 
@@ -360,6 +360,9 @@ EOF
     update_profile_export "GOPROXY" "https://proxy.golang.org,off"
     update_profile_export "GOSUMDB" "sum.golang.org"
     update_profile_export "GONOSUMCHECK" ""
+
+    # Go telemetry opt-out (Go 1.23+ writes mode to ~/.config/go/telemetry/mode)
+    command -v go &>/dev/null && go telemetry off 2>/dev/null || true
 
     # Ensure ZSH sources ~/.profile on non-Kali systems
     ensure_zprofile_sources_profile
@@ -1484,9 +1487,7 @@ EOF
 
     # Install Terminator tab numbers plugin
     log "Installing Terminator tab numbers plugin..."
-    if [[ ! -d ~/.config/terminator/plugins ]]; then
-        mkdir -p ~/.config/terminator/plugins
-    fi
+    mkdir -p ~/.config/terminator/plugins
 
     if [[ ! -f ~/.config/terminator/plugins/tab_numbers.py ]]; then
         if curl --proto '=https' --tlsv1.2 -fsSL -o ~/.config/terminator/plugins/tab_numbers.py https://raw.githubusercontent.com/c0ffee0wl/terminator-tab-numbers-plugin/main/tab_numbers.py; then
