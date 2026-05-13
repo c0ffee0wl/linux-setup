@@ -453,8 +453,10 @@ install_cargo_tool() {
 install_rust_via_rustup() {
     log "Installing Rust via rustup (official Rust installer)..."
 
-    # Download and run rustup-init
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+    # Download and run rustup-init. RUSTUP_INIT_SKIP_PATH_CHECK silences the
+    # "existing Rust at /usr/bin" warning when apt's rustc is also installed —
+    # ~/.cargo/bin is prepended to PATH in .zshrc so rustup's toolchain wins.
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | RUSTUP_INIT_SKIP_PATH_CHECK=yes sh -s -- -y --default-toolchain stable
 
     # Source cargo environment for this script
     export CARGO_HOME="$HOME/.cargo"
