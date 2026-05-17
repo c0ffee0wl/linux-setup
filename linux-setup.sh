@@ -359,6 +359,9 @@ EOF
     # Hugging Face Hub (huggingface_hub, transformers, datasets)
     update_profile_export "HF_HUB_DISABLE_TELEMETRY" "1"
 
+    # GrowthBook feature-flag/experimentation client
+    update_profile_export "DISABLE_GROWTHBOOK" "1"
+
     # Go module supply-chain hardening
     update_profile_export "GOPROXY" "https://proxy.golang.org,off"
     update_profile_export "GOSUMDB" "sum.golang.org"
