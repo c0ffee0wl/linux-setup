@@ -615,14 +615,20 @@ fi
 # Note: npm is NOT symlinked — bun's package manager uses its own CLI interface
 # (bun install, bun add, etc.) and does not emulate npm's command set when
 # invoked as "npm".
-log "Setting up Node.js compatibility symlinks for Bun..."
+log "Setting up Node.js compatibility shims for Bun..."
 BUN_BIN="${BUN_INSTALL:-$HOME/.bun}/bin"
 if [ -x "$BUN_BIN/bun" ]; then
     ln -sf "$BUN_BIN/bun" "$BUN_BIN/node"
-    ln -sf "$BUN_BIN/bunx" "$BUN_BIN/npx"
-    log "Created node, npx symlinks in $BUN_BIN"
+    # npx is a wrapper, not a symlink: bun's argv[0] sniffing only recognises
+    # "bunx"/"node", so a symlink invoked as "npx" runs `bun <arg>` and fails
+    # with `Script not found`. The wrapper calls `bun x` explicitly.
+    install -m 755 /dev/stdin "$BUN_BIN/npx" << NPX_EOF
+#!/bin/sh
+exec "$BUN_BIN/bun" x "\$@"
+NPX_EOF
+    log "Created node symlink and npx wrapper in $BUN_BIN"
 else
-    warn "Bun binary not found at $BUN_BIN/bun, skipping Node.js compatibility symlinks"
+    warn "Bun binary not found at $BUN_BIN/bun, skipping Node.js compatibility shims"
 fi
 
 #############################################################################
