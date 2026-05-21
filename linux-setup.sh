@@ -5,7 +5,7 @@
 
 set -eo pipefail
 
-VERSION="1.4"
+VERSION="1.5"
 FORCE_MODE=false
 NO_MODE=false
 NO_HACKING_TOOLS=false
@@ -715,8 +715,8 @@ if ! command -v docker &> /dev/null; then
 
         # Validate against supported Ubuntu versions
         case "$DOCKER_CODENAME" in
-            questing|noble|jammy)
-                # Officially supported Ubuntu versions (25.10, 24.04 LTS, 22.04 LTS)
+            resolute|questing|noble|jammy)
+                # Officially supported Ubuntu versions (26.04 LTS, 25.10, 24.04 LTS, 22.04 LTS)
                 ;;
             *)
                 log "Warning: Ubuntu codename '$DOCKER_CODENAME' is not officially supported by Docker. Falling back to Trixie."
