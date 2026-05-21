@@ -957,6 +957,10 @@ cat > ~/.zshrc << 'EOF'
 # ~/.zshrc file for zsh interactive shells.
 # see /usr/share/doc/zsh/examples/zshrc for examples
 
+# Keep $PATH (and the tied $path array) free of duplicate entries, so
+# re-sourcing this file or nested shells cannot bloat $PATH over time.
+typeset -U path PATH
+
 setopt autocd              # change directory just by typing its name
 #setopt correct            # auto correct mistakes
 setopt interactivecomments # allow comments in interactive mode
