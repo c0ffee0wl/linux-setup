@@ -1630,8 +1630,9 @@ fi
 # Free <Super>e for Terminator (XFCE binds it to the file manager by default)
 if has_desktop_environment; then
     if command -v xfconf-query &> /dev/null; then
-        log "Unsetting XFCE <Super>e shortcut so Terminator can use it..."
-        xfconf-query -c xfce4-keyboard-shortcuts -p "/commands/custom/<Super>e" --create -t string -s "" || true
+        log "Deleting XFCE <Super>e shortcut so Terminator can use it..."
+        xfconf-query -c xfce4-keyboard-shortcuts -p "/commands/custom/<Super>e" -r 2>/dev/null || true
+        xfconf-query -c xfce4-keyboard-shortcuts -p "/commands/default/<Super>e" -r 2>/dev/null || true
     fi
 fi
 
