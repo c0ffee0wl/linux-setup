@@ -1476,7 +1476,7 @@ cat > ~/.config/terminator/config << 'EOF'
   switch_to_tab_6 = <Primary>6
   group_tab = ""
   insert_number = <Super>n
-  edit_tab_title = <Super>r
+  edit_tab_title = <Super>e
   edit_terminal_title = <Super>t
 [profiles]
   [[default]]
@@ -1625,6 +1625,14 @@ if has_desktop_environment; then
     fi
 else
     log "No desktop environment detected - skipping keyboard layout configuration"
+fi
+
+# Free <Super>e for Terminator (XFCE binds it to the file manager by default)
+if has_desktop_environment; then
+    if command -v xfconf-query &> /dev/null; then
+        log "Unsetting XFCE <Super>e shortcut so Terminator can use it..."
+        xfconf-query -c xfce4-keyboard-shortcuts -p "/commands/custom/<Super>e" --create -t string -s "" || true
+    fi
 fi
 
 log "Setup complete!"
