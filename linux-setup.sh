@@ -1430,6 +1430,14 @@ else
     log "Shell is already set to zsh"
 fi
 
+# Suppress "Last login" banner on shell startup
+if [ ! -f ~/.hushlogin ]; then
+    log "Creating ~/.hushlogin to suppress login banner..."
+    touch ~/.hushlogin
+else
+    log "~/.hushlogin already exists"
+fi
+
 # Configure Terminator
 if has_desktop_environment; then
     log "Configuring Terminator..."
