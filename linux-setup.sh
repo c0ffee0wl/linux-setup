@@ -266,6 +266,7 @@ save-exact=true
 audit=true
 fund=false
 min-release-age=10080
+minimum-release-age=10080
 EOF
 
     # --- Bun hardening (user-level) ---
@@ -317,6 +318,7 @@ save-exact=true
 audit=true
 fund=false
 min-release-age=10080
+minimum-release-age=10080
 EOF
 
         sudo tee /etc/uv/uv.toml > /dev/null << 'EOF'
