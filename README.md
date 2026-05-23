@@ -173,7 +173,7 @@ The script configures Terminator as the default terminal emulator with custom ke
 - `Alt+<Arrow>` - Switch to left/right/upper/lower terminal
 - `Ctrl+D` - Close terminal
 - `Super+N` - Insert tab number in terminal
-- `Super+R` - Rename/edit tab title
+- `Super+E` - Rename/edit tab title
 - `Super+T` - Edit terminal title
 
 **Window Splitting:**
