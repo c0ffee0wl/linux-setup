@@ -5,7 +5,7 @@
 
 set -eo pipefail
 
-VERSION="1.5"
+VERSION="1.6"
 FORCE_MODE=false
 NO_MODE=false
 NO_HACKING_TOOLS=false
@@ -400,6 +400,56 @@ has_desktop_environment() {
     fi
 
     return 1
+}
+
+# Detect whether the current terminal has a dark background.
+# Primary: OSC 11 query of the live terminal (what bat/neovim/fish use).
+# Fallback: $COLORFGBG. Returns 0 only when dark is positively detected;
+# returns 1 for light OR undeterminable (so the caller keeps the light theme).
+is_dark_terminal() {
+    local r g b lum reply oldstty bg hr hg hb
+
+    # Primary: ask the terminal for its background color (OSC 11, BEL-terminated).
+    if [ -t 0 ] && [ -t 1 ] && [ -e /dev/tty ]; then
+        oldstty=$(stty -g < /dev/tty 2>/dev/null) || oldstty=""
+        if [ -n "$oldstty" ]; then
+            # Restore the terminal if interrupted mid-query, so a Ctrl-C during
+            # the read can't leave it stuck in raw/no-echo mode.
+            trap 'stty "$oldstty" < /dev/tty 2>/dev/null; trap - INT TERM HUP; exit 130' INT TERM HUP
+            stty raw -echo min 0 time 0 < /dev/tty 2>/dev/null || true
+            printf '\033]11;?\007' > /dev/tty 2>/dev/null || true
+            IFS= read -r -d $'\007' -t 1 reply < /dev/tty 2>/dev/null || true
+            stty "$oldstty" < /dev/tty 2>/dev/null || true
+            trap - INT TERM HUP
+
+            # Reply looks like: ESC]11;rgb:RRRR/GGGG/BBBB
+            if [[ "$reply" =~ rgb:([0-9a-fA-F]+)/([0-9a-fA-F]+)/([0-9a-fA-F]+) ]]; then
+                # Channels may be 1, 2, or 4 hex digits; normalize to 8-bit. A
+                # 1-digit channel repeats (f -> ff = 255); wider forms keep their
+                # top two digits (ffff -> ff, 2828 -> 28).
+                hr=${BASH_REMATCH[1]}; hg=${BASH_REMATCH[2]}; hb=${BASH_REMATCH[3]}
+                [ ${#hr} -eq 1 ] && hr=$hr$hr
+                [ ${#hg} -eq 1 ] && hg=$hg$hg
+                [ ${#hb} -eq 1 ] && hb=$hb$hb
+                r=$((16#${hr:0:2})); g=$((16#${hg:0:2})); b=$((16#${hb:0:2}))
+                lum=$(( (299*r + 587*g + 114*b) / 1000 ))   # BT.601, 0..255
+                [ "$lum" -lt 128 ] && return 0   # dark
+                return 1                          # light (positively)
+            fi
+        fi
+    fi
+
+    # Fallback: COLORFGBG = "fg;bg" (or "fg;default;bg"); low bg index => dark.
+    # Require a ';' so a single-field (foreground-only) value isn't read as bg.
+    if [ -n "${COLORFGBG:-}" ] && [[ "$COLORFGBG" == *";"* ]]; then
+        bg="${COLORFGBG##*;}"
+        case "$bg" in
+            0|1|2|3|4|5|6|8) return 0 ;;   # dark background
+            7|9|1[0-5])      return 1 ;;   # light background
+        esac
+    fi
+
+    return 1   # inconclusive -> treat as light, keep the theme
 }
 
 # Convert version string to comparable number: "1.85" -> 185, "" -> 0
@@ -1374,6 +1424,14 @@ export PATH="$BUN_INSTALL/bin:$PATH"
 # Python uv and local packages PATH configuration
 export PATH=$HOME/.local/bin:$PATH
 EOF
+
+# Coldark-Cold is a light theme and is illegible on a dark terminal. When the
+# terminal background is dark, drop the explicit theme so bat uses its dark
+# default. Only act on a positive dark detection (see is_dark_terminal).
+if is_dark_terminal; then
+    sed -i 's/ --theme=Coldark-Cold//g' ~/.zshrc
+    log "Dark terminal detected: removed bat's light theme (Coldark-Cold)"
+fi
 fi
 
 # Migrate bash history to zsh if switching from bash
