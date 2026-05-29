@@ -442,8 +442,8 @@ This provides quick access to recent commands without needing to launch a full s
 # Press Ctrl+R to launch interactive history search
 # Type to filter commands, use arrows to navigate
 
-# Or use the hh alias
-hh
+# Or use the h alias
+h
 
 # Search for specific pattern
 hstr docker

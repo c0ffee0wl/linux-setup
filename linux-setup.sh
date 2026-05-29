@@ -1335,7 +1335,7 @@ bracketed-paste() {
 zle -N bracketed-paste
 
 # HSTR configuration
-alias hh=hstr                    # hh to be alias for hstr
+alias h=hstr                     # h to be alias for hstr
 setopt histignorespace           # skip cmds w/ leading space from history
 export HSTR_CONFIG=hicolor,raw-history-view      # get more colors
 hstr_no_tiocsti() {
