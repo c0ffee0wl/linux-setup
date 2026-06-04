@@ -58,11 +58,11 @@
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
-A comprehensive automation script for setting up a fresh Debian/Kali Linux installation with development tools, terminal enhancements, and security-focused configurations.
+A Bash script that sets up a fresh Debian, Ubuntu, or Kali install with development tools, terminal tweaks, and security hardening.
 
 ## Overview
 
-This script configures a fresh Debian-based Linux system (optimized for Kali Linux) with essential development tools, modern terminal utilities, and productivity enhancements. It's designed for security professionals, developers, and power users who want a consistent, well-configured Linux environment.
+It configures a fresh Debian-based system (tuned for Kali) with the dev tools, CLI utilities, and shell setup worth having on every machine. If you're a security professional or developer who keeps rebuilding boxes and wants the same environment each time, this is for you.
 
 ## Requirements
 
@@ -155,11 +155,13 @@ After running the script:
 
 ## Usage Examples
 
-This section demonstrates practical usage of the installed tools with real-world examples.
+Examples of the installed tools in action.
 
 ### Terminator Terminal
 
-The script configures Terminator as the default terminal emulator with custom keybindings and settings optimized for productivity.
+The script sets Terminator as the default terminal, with custom keybindings and a few tweaked defaults.
+
+> **Want an AI agent built into your terminal?** This setup ships Terminator. If you'd rather have an LLM agent living in the terminal itself, take a look at [zap-setup](https://github.com/c0ffee0wl/zap-setup), a companion installer for the [Zap](https://github.com/zerx-lab/zap) terminal. It installs Zap, gives it Terminator-style keybindings and a matching light theme, and pre-wires the agent so you can point it at whatever LLM provider you like. A local LiteLLM proxy is set up out of the box, but any provider Zap supports works just as well. The AI side is optional too, so Zap still works as a plain terminal if you never add a key. It's a separate program, not part of this script.
 
 #### Terminator Keyboard Shortcuts
 
@@ -852,7 +854,7 @@ The script creates/modifies these configuration files:
 
 ## Tools Reference
 
-This section provides a comprehensive reference of all tools installed by the script, including links to their documentation and availability information.
+Every tool the script installs, with links to its homepage and docs.
 
 ### Core System Tools
 
