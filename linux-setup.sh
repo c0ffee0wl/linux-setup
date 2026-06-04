@@ -1055,6 +1055,10 @@ else
   # Cache is stale or doesn't exist - regenerate
   compinit -i -d "$zcompdump_file"
   touch "$zcompdump_file"
+  # Pre-parse the dump to wordcode. compinit -C's internal `source` auto-loads
+  # the faster .zwc when it is newer than the text dump (~12ms/startup saved on
+  # a typical dump). Guarded so a write failure falls back to the text dump.
+  zcompile "$zcompdump_file" 2>/dev/null || true
 fi
 unsetopt extended_glob
 zstyle ':completion:*:*:*:*:*' menu select
@@ -1255,7 +1259,20 @@ precmd() {
 
 # enable color support of ls, less and man, and also add handy aliases
 if [ -x /usr/bin/dircolors ]; then
-    test -r ~/.dircolors && eval "$(dircolors -b ~/.dircolors)" || eval "$(dircolors -b)"
+    # Cache dircolors output (like zoxide) to avoid forking dircolors on every
+    # startup. Regenerate when the dircolors binary or a custom ~/.dircolors is
+    # newer than the cache; $commands[dircolors] is a fork-free path lookup.
+    _dircolors_cache="${XDG_CACHE_HOME:-$HOME/.cache}/dircolors.zsh"
+    if [[ ! -s "$_dircolors_cache" || $commands[dircolors] -nt "$_dircolors_cache" || ( -r ~/.dircolors && ~/.dircolors -nt "$_dircolors_cache" ) ]]; then
+        mkdir -p "${_dircolors_cache%/*}"
+        if [[ -r ~/.dircolors ]]; then
+            dircolors -b ~/.dircolors
+        else
+            dircolors -b
+        fi > "$_dircolors_cache"
+    fi
+    source "$_dircolors_cache"
+    unset _dircolors_cache
     export LS_COLORS="$LS_COLORS:ow=30;44:" # fix ls color for folders with 777 permissions
 
     alias ls='ls --color=auto'
