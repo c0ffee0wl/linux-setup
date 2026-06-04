@@ -5,7 +5,7 @@
 
 set -eo pipefail
 
-VERSION="1.6"
+VERSION="1.7"
 FORCE_MODE=false
 NO_MODE=false
 NO_HACKING_TOOLS=false
@@ -1299,10 +1299,17 @@ fi
 # Enhanced tab completion
 setopt complete_in_word       # cd /ho/ka/Dow<TAB> expands to /home/kali/Downloads
 
-# zoxide - smarter cd command
-# Only initialize in interactive shells to avoid interfering with automation tools
+# zoxide - smarter cd command (interactive shells only, to avoid interfering with automation).
+# Cache the init script so we don't spawn `zoxide init` on every startup; $commands[zoxide] is
+# zsh's fork-free path lookup, so regenerate only when the binary is newer (e.g. after upgrade).
 if command -v zoxide &> /dev/null && [[ -o interactive ]]; then
-    eval "$(zoxide init zsh --cmd cd)"
+    _zoxide_cache="${XDG_CACHE_HOME:-$HOME/.cache}/zoxide-init.zsh"
+    if [[ ! -s "$_zoxide_cache" || $commands[zoxide] -nt "$_zoxide_cache" ]]; then
+        mkdir -p "${_zoxide_cache%/*}"
+        zoxide init zsh --cmd cd > "$_zoxide_cache"
+    fi
+    source "$_zoxide_cache"
+    unset _zoxide_cache
 fi
 
 # Enhanced history settings
