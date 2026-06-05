@@ -1568,7 +1568,7 @@ cat > ~/.config/terminator/config << 'EOF'
   switch_to_tab_6 = <Primary>6
   group_tab = ""
   insert_number = <Super>n
-  edit_tab_title = <Super>e
+  edit_tab_title = <Super>q
   edit_terminal_title = <Super>t
 [profiles]
   [[default]]
@@ -1719,12 +1719,14 @@ else
     log "No desktop environment detected - skipping keyboard layout configuration"
 fi
 
-# Free <Super>e for Terminator (XFCE binds it to the file manager by default)
+# Free <Super>q for Terminator's rename-tab binding. XFCE has no default on
+# Super+Q, but clear any stray binding so the chord reaches Terminator. We no
+# longer touch <Super>e, so XFCE's built-in file-manager shortcut keeps working.
 if has_desktop_environment; then
     if command -v xfconf-query &> /dev/null; then
-        log "Deleting XFCE <Super>e shortcut so Terminator can use it..."
-        xfconf-query -c xfce4-keyboard-shortcuts -p "/commands/custom/<Super>e" -r 2>/dev/null || true
-        xfconf-query -c xfce4-keyboard-shortcuts -p "/commands/default/<Super>e" -r 2>/dev/null || true
+        log "Deleting XFCE <Super>q shortcut so Terminator can use it..."
+        xfconf-query -c xfce4-keyboard-shortcuts -p "/commands/custom/<Super>q" -r 2>/dev/null || true
+        xfconf-query -c xfce4-keyboard-shortcuts -p "/commands/default/<Super>q" -r 2>/dev/null || true
     fi
 fi
 

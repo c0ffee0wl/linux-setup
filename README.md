@@ -175,7 +175,7 @@ The script sets Terminator as the default terminal, with custom keybindings and 
 - `Alt+<Arrow>` - Switch to left/right/upper/lower terminal
 - `Ctrl+D` - Close terminal
 - `Super+N` - Insert tab number in terminal
-- `Super+E` - Rename/edit tab title
+- `Super+Q` - Rename/edit tab title
 - `Super+T` - Edit terminal title
 
 **Window Splitting:**
