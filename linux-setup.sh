@@ -5,18 +5,22 @@
 
 set -eo pipefail
 
-VERSION="1.7"
+VERSION="1.8"
 FORCE_MODE=false
 NO_MODE=false
 NO_HACKING_TOOLS=false
 HARDEN_ONLY=false
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+# Colors for output (suppressed when not a TTY or when NO_COLOR is set)
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+    RED='\033[0;31m'
+    GREEN='\033[0;32m'
+    YELLOW='\033[1;33m'
+    BLUE='\033[0;34m'
+    NC='\033[0m' # No Color
+else
+    RED='' GREEN='' YELLOW='' BLUE='' NC=''
+fi
 
 # Show usage information
 show_usage() {
@@ -105,15 +109,15 @@ done
 
 # Logging function
 log() {
-    echo -e "${GREEN}[$(date +'%Y-%m-%d %H:%M:%S')] $1${NC}"
+    echo -e "${GREEN}[$(date +'%Y-%m-%d %H:%M:%S')]${NC} $1"
 }
 
 warn() {
-    echo -e "${YELLOW}[WARNING] $1${NC}"
+    echo -e "${YELLOW}[WARNING]${NC} $1"
 }
 
 error() {
-    echo -e "${RED}[ERROR] $1${NC}"
+    echo -e "${RED}[ERROR]${NC} $1"
     exit 1
 }
 
