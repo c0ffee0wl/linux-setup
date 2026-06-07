@@ -5,7 +5,7 @@
 
 set -eo pipefail
 
-VERSION="1.9"
+VERSION="2.0"
 FORCE_MODE=false
 NO_MODE=false
 NO_HACKING_TOOLS=false
@@ -265,7 +265,7 @@ apply_supply_chain_hardening() {
     # bun already blocks lifecycle scripts via trustedDependencies model.
     # Cooldown units differ per tool: npm reads `min-release-age` in DAYS,
     # pnpm reads `minimum-release-age` (same ~/.npmrc) in MINUTES. 7 days ==
-    # 10080 minutes; both match the uv/bun/pip 7-day cooldown.
+    # 10080 minutes; both match the uv/bun 7-day cooldown.
     log "Configuring npm security hardening..."
     cat > "$HOME/.npmrc" << 'EOF'
 ignore-scripts=true
@@ -305,15 +305,12 @@ system-certs = true
 python-preference = "system"
 EOF
 
-    # uploaded-prior-to is a 7-day cooldown (pip 26.1+, ISO-8601 duration);
-    # silently ignored by older pip, so it is safe to set unconditionally.
     cat > "$HOME/.config/pip/pip.conf" << 'EOF'
 [global]
 prefer-binary = true
 
 [install]
 prefer-binary = true
-uploaded-prior-to = P7D
 EOF
 
     # --- System-level fallback configs (defence-in-depth) ---
@@ -343,7 +340,6 @@ prefer-binary = true
 
 [install]
 prefer-binary = true
-uploaded-prior-to = P7D
 EOF
 
         log "System-level fallback configs deployed"
