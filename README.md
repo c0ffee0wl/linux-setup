@@ -351,7 +351,7 @@ tldr --list | grep network
 `bat` is a `cat` clone with syntax highlighting and Git integration:
 
 ```bash
-# View a file with syntax highlighting (batcat is aliased to cat)
+# View a file with syntax highlighting (bat is aliased to batcat)
 bat script.py
 
 # View with line numbers
@@ -476,7 +476,7 @@ unp data.7z
 
 ### [httpie](https://httpie.io/) - User-Friendly HTTP Client
 
-`httpie` is a modern, user-friendly alternative to `curl` with intuitive syntax, JSON support, and colorized output:
+`httpie` is a friendlier alternative to `curl`. JSON is the default request body, responses come back colorized, and the syntax is easier to remember:
 
 ```bash
 # Simple GET request (auto-formats JSON response)
@@ -548,7 +548,7 @@ ncdu -o diskusage.json
 
 ### [uv](https://github.com/astral-sh/uv) - Fast Python Package Manager
 
-`uv` is an extremely fast Python package installer and resolver, written in Rust. It's **10-100x faster** than pip:
+`uv` is a Python package installer and resolver written in Rust. Astral, its maker, benchmarks it at 10-100x faster than pip:
 
 ```bash
 uv --help
@@ -690,7 +690,7 @@ gitsnip https://github.com/user/private-repo config ./config -t YOUR_GITHUB_TOKE
 
 ### [lazygit](https://github.com/jesseduffield/lazygit) - Terminal UI for Git Commands
 
-lazygit provides a simple terminal UI for git commands, making complex Git operations intuitive and visual:
+lazygit is a terminal UI for git. It's especially handy for the clumsy operations, like partial staging and interactive rebase:
 
 ```bash
 # Launch lazygit in current repository
@@ -748,7 +748,7 @@ lg()
 
 ### [lazydocker](https://github.com/jesseduffield/lazydocker) - Terminal UI for Docker
 
-lazydocker provides a simple terminal UI for both docker and docker-compose, making container management visual and intuitive:
+lazydocker is a terminal UI for docker and docker-compose. Container status, logs, and stats all live on one screen:
 
 ```bash
 # Launch lazydocker
@@ -808,7 +808,7 @@ The script creates/modifies these configuration files:
 - `~/.npmrc` - npm security hardening (ignore-scripts, save-exact, min-release-age)
 - `~/.bunfig.toml` - Bun security hardening (exact versions, minimum release age)
 - `~/.cargo/config.toml` - Cargo security hardening (git-fetch-with-cli)
-- `~/.config/uv/uv.toml` - uv security hardening (exclude-newer, native-tls)
+- `~/.config/uv/uv.toml` - uv security hardening (exclude-newer, system-certs)
 - `~/.config/pip/pip.conf` - pip security hardening (prefer-binary)
 
 **Supply-Chain Hardening (system-level fallbacks):**
@@ -836,7 +836,7 @@ The script creates/modifies these configuration files:
   - npm: `ignore-scripts=true`, `save-exact=true`, 7-day `min-release-age` quarantine
   - Bun: exact version pinning, 7-day `minimumReleaseAge`, text lockfiles
   - pip: `prefer-binary=true` (avoids running untrusted `setup.py`)
-  - uv: `exclude-newer` 1-week quarantine, `native-tls` (system CA store), system Python preference
+  - uv: `exclude-newer` 1-week quarantine, `system-certs` (system CA store), system Python preference
   - Go: `GOPROXY=proxy.golang.org,off`, `GOSUMDB=sum.golang.org` (checksum verification)
   - Cargo: `git-fetch-with-cli` (uses system git instead of libgit2), `--locked` on all installs
   - curl: `--proto '=https' --tlsv1.2` enforced on all remote script downloads
@@ -994,7 +994,7 @@ The script can be modified for different environments:
 
 ## License
 
-This project is licensed under the GNU General Public License v3.0 - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
 
 ## Acknowledgments
 
