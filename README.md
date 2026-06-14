@@ -136,7 +136,7 @@ Use this flag to apply only supply-chain hardening configurations without instal
 1. **System verification**: Checks OS compatibility and user privileges
 2. **Package updates**: Updates system packages and repositories
 3. **Tool installation**: Installs all development and productivity tools
-4. **Configuration**: Sets up shell, terminal, and system preferences
+4. **Configuration**: Sets up shell, terminal, and system preferences (on XFCE, disables the screensaver, lock screen, and display power management/DPMS)
 5. **Security setup**: Configures Docker and sandboxing tools
 6. **Cleanup**: Removes unnecessary packages and cleans package cache
 
@@ -800,8 +800,8 @@ The script creates/modifies these configuration files:
 
 **Desktop Environment (XFCE):**
 - `~/.config/xfce4/helpers.rc` - Default terminal application settings
-- `~/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-screensaver.xml` - Screensaver settings
-- `~/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-power-manager.xml` - Power management settings
+- `~/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-screensaver.xml` - Screensaver & lock screen (both disabled)
+- `~/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-power-manager.xml` - Display power management / DPMS (disabled)
 - `~/.config/xfce4/xfconf/xfce-perchannel-xml/keyboard-layout.xml` - Keyboard layout (German)
 
 **Supply-Chain Hardening (user-level):**
