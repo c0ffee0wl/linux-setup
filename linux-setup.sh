@@ -10,6 +10,7 @@ FORCE_MODE=false
 NO_MODE=false
 NO_HACKING_TOOLS=false
 HARDEN_ONLY=false
+NO_KEYBOARD_LAYOUT=false
 
 # Colors for output (suppressed when not a TTY or when NO_COLOR is set)
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
@@ -35,6 +36,7 @@ Options:
   --yes, -y            Same as --force
   --no, -n             Run in non-interactive mode, automatically answering 'No' to all prompts
   --no-hacking-tools   Skip installation of hacking/pentest tools (even on Kali)
+  --no-keyboard-layout Skip configuring the German XFCE keyboard layout (useful with --force)
   --harden-only        Apply only supply-chain hardening configs (no installs, no shell changes)
   --help, -h           Display this help message and exit
 
@@ -43,7 +45,7 @@ Interactive Mode (default):
   - Overwriting existing .zshrc configuration
   - Changing default shell to zsh
   - Overwriting existing Terminator configuration
-  - Configuring German keyboard layout in XFCE
+  - Configuring German keyboard layout in XFCE (skip with --no-keyboard-layout)
 
 Force/Yes Mode (--force, --yes, -f, -y):
   All prompts are automatically answered 'Yes'. Useful for:
@@ -90,6 +92,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --no-hacking-tools)
             NO_HACKING_TOOLS=true
+            shift
+            ;;
+        --no-keyboard-layout)
+            NO_KEYBOARD_LAYOUT=true
             shift
             ;;
         --harden-only)
@@ -1709,7 +1715,9 @@ uv cache clean || true
 rm -rf "$HOME/.cargo/registry/cache" "$HOME/.cargo/registry/src" "$HOME/.cargo/git/checkouts" 2>/dev/null || true
 
 # Configure Xfce keyboard layout to German
-if has_desktop_environment; then
+if [[ "$NO_KEYBOARD_LAYOUT" == "true" ]]; then
+    log "Skipping keyboard layout configuration (--no-keyboard-layout)"
+elif has_desktop_environment; then
     if command -v xfconf-query &> /dev/null; then
         if prompt_yes_no "Configure German keyboard layout in XFCE?" "N"; then
             log "Configuring Xfce keyboard layout to German..."

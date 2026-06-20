@@ -62,7 +62,7 @@ A Bash script that sets up a fresh Debian, Ubuntu, or Kali install with developm
 
 ## Overview
 
-It configures a fresh Debian-based system (tuned for Kali) with the dev tools, CLI utilities, and shell setup worth having on every machine. If you're a security professional or developer who keeps rebuilding boxes and wants the same environment each time, this is for you.
+Built for a fresh install and safe to re-run: it skips whatever is already in place and backs up files before touching them. It works on any Debian base but is tuned for Kali. It's for security folks and developers who rebuild machines often and want the same setup every time instead of redoing it by hand.
 
 ## Requirements
 
@@ -94,6 +94,9 @@ The script supports the following command-line options:
 # Skip hacking tools even on Kali Linux
 ./linux-setup.sh --no-hacking-tools
 
+# Skip configuring the German XFCE keyboard layout (useful with --force)
+./linux-setup.sh --no-keyboard-layout
+
 # Apply only supply-chain hardening configs (no package installs, no shell changes)
 ./linux-setup.sh --harden-only
 ```
@@ -103,10 +106,10 @@ By default, the script will prompt you for confirmation on certain actions:
 - Overwriting existing `.zshrc` configuration (default: Yes)
 - Changing default shell to zsh (default: Yes)
 - Overwriting existing Terminator configuration (default: No)
-- Configuring German keyboard layout in XFCE (default: No)
+- Configuring German keyboard layout in XFCE (default: No; skip entirely with `--no-keyboard-layout`)
 
 **Notes:**
-- Backups are automatically created with timestamps before overwriting any files
+- The script makes a timestamped backup before overwriting any file
 - All package installations (Docker, Go, Rust, Bun, tools, etc.) happen automatically without prompts
 
 **Force Mode (`--force` or `-f`):**
@@ -125,6 +128,9 @@ Use this flag to skip installation of hacking/pentest tools even when running on
 - Project Discovery tools (pdtm and all tools it installs)
 - BloodHoundAnalyzer
 - bbot, NetExec
+
+**No Keyboard Layout (`--no-keyboard-layout`):**
+Use this flag to skip configuring the German XFCE keyboard layout. By default this is only applied if you answer "Yes" to the interactive prompt (default: No), but `--force` auto-answers "Yes", so pass this flag together with `--force` to keep your existing keyboard layout in unattended runs.
 
 **Harden Only (`--harden-only`):**
 Use this flag to apply only supply-chain hardening configurations without installing any packages or changing shell/terminal settings. This writes package manager configs (npm, Bun, Cargo, uv, pip), system-level fallback configs, telemetry opt-outs, and Go module hardening environment variables. Useful for:
@@ -433,7 +439,7 @@ git  # Press up arrow to cycle through commands starting with 'git'
 cd   # Press up arrow to find previous 'cd' commands
 ```
 
-This provides quick access to recent commands without needing to launch a full search interface. For more advanced history search with filtering and visual interface, use hstr (see below).
+It's a fast way back to recent commands without opening a full search UI. For filtering and a visual interface, use hstr (see below).
 
 ### [hstr](https://github.com/dvorka/hstr) - Enhanced History Search
 
@@ -998,8 +1004,8 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 
 ## Acknowledgments
 
-- Based on Kali Linux default configurations
-- Inspired by modern terminal and shell enhancements
+- Builds on Kali's default zsh and Terminator configs
+- Bundles tools from the open-source CLI community (ripgrep, fzf, zoxide, lazygit, and more)
 
 ---
 
