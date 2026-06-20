@@ -179,7 +179,6 @@ The script sets Terminator as the default terminal, with custom keybindings and 
 - `Ctrl+Shift+Page_Down` - Move current tab right
 - `Ctrl+Shift+Page_Up` - Move current tab left
 - `Alt+<Arrow>` - Switch to left/right/upper/lower terminal
-- `Ctrl+D` - Close terminal
 - `Super+N` - Insert tab number in terminal
 - `Super+Q` - Rename/edit tab title
 
@@ -198,14 +197,17 @@ The script sets Terminator as the default terminal, with custom keybindings and 
 
 > **Note**: `Super` key is typically the Windows/Command key on most keyboards.
 
+> **Note**: `Ctrl+D` on an empty prompt closes a terminal by sending EOF to the shell - this is standard shell behavior, not a Terminator keybinding (Terminator's own close-terminal shortcut is left unbound).
+
 ### Shell Operations Previewed in Ultimate Plumber
 
 Classic Unix command pipelines with `awk`, `cut`, and `sed`, previewed with [up - the Ultimate Plumber](https://github.com/akavel/up), safely [bubblewrapped](https://github.com/containers/bubblewrap) in a sandbox.
 
 ```bash
-# Toggle between command and result with Ctrl+P (up tool integration)
-cat users.txt |    # Press Ctrl+P to interactively build the pipeline
-# Press Ctrl+X when satisfied with the sandboxed preview to actually execute
+# Build a pipeline interactively with up (Ultimate Plumber) via the Ctrl+P integration
+cat users.txt |    # Press Ctrl+P to pipe the current command line into up
+# Refine the pipeline against the live sandboxed preview, then press Ctrl+X to exit up:
+# the built pipeline is placed on your command line. Press Enter to actually run it.
 
 # Process user data: extract field, trim path, remove header/footer
 cat users.txt | awk '{print $5}' | cut -d '/' -f2 | sed '1,2d; $d'
@@ -240,7 +242,7 @@ time grep -i hodor -r
 #   -A n: show n lines after match
 #   -B n: show n lines before match
 #   -C n: show n lines of context (before and after)
-#   -u, -uu, -uuu: unrestricted searching (gitignored, hidden, binary files)
+#   -u: ignore .gitignore; -uu: also search hidden files; -uuu: also search binary files
 #   -l: list files matching
 #   -e: pattern (regex) to search for
 #   -o: show only matching fragment
@@ -317,8 +319,10 @@ cat users.txt | awk '{print $4}' | sponge users.txt
 rm users.txt
 cp users.txt.bup users.txt
 
-# WARNING: sponge buffers entire output in memory before writing!
-# Be careful with large files or long-running commands.
+# NOTE: sponge soaks up ALL of stdin before writing the file. Small inputs are held
+# in memory; large inputs spill to a temp file in $TMPDIR (ideally on the same
+# filesystem as the target, so the atomic rename works). It also blocks until the
+# producing command finishes - avoid unbounded/never-ending streams.
 ```
 
 Other useful tools from `moreutils`:
@@ -461,14 +465,14 @@ hstr docker
 # - Better than default Ctrl+R search
 ```
 
-**Official Video Tutorials**:
+**Video Tutorials**:
 - [Dvorka's Demo](https://www.youtube.com/watch?v=sPF29NyXe2U) - Demonstration by the creator
 - [Zack's Tutorial](https://www.youtube.com/watch?v=Qd75pIeQkH8) - User tutorial
 - [Yu-Jie Lin's Presentation](https://www.youtube.com/watch?v=Qx5n_5B5xUw) - Feature showcase
 
-### [unp](https://packages.debian.org/bookworm/unp) - Universal Unpacker
+### [unp](https://packages.debian.org/trixie/unp) - Universal Unpacker
 
-`unp` automatically detects and extracts various archive formats:
+`unp` extracts many archive formats, automatically picking the right extraction tool for each:
 
 ```bash
 # Extract any archive type
@@ -477,7 +481,8 @@ unp tarball.tar.gz
 unp file.rar
 unp data.7z
 
-# Supported formats: zip, tar, tar.gz, tar.bz2, tar.xz, rar, 7z, deb, rpm, and more
+# Supported formats: zip, tar.gz, tar.bz2, tar.xz, deb, and more.
+# rar/7z/rpm need the matching backend tool installed (p7zip, unrar, rpm2cpio).
 ```
 
 ### [httpie](https://httpie.io/) - User-Friendly HTTP Client
@@ -512,8 +517,8 @@ http --form POST https://httpbin.org/post name=Alice file@document.pdf
 # Upload JSON file
 http POST https://api.example.com/data < data.json
 
-# Pretty-print existing JSON file
-http --print=b --pretty=all --offline < messy.json
+# Pretty-print an existing JSON file (build the request offline, don't send it)
+http --print=B --pretty=all --offline < messy.json
 
 # Follow redirects
 http --follow https://example.com/redirect
@@ -537,7 +542,7 @@ ncdu
 # Analyze specific directory
 ncdu /var
 
-# Analyze with progress indicator
+# Use a color scheme tuned for dark terminals
 ncdu --color dark /home
 
 # Export results to file
@@ -566,7 +571,7 @@ uv pip install flask
 
 # Run Python tools without installing (uvx is shorthand for uv tool run)
 uv tool run ruff                      # Run tool without parameters
-uv tool run httpie httpbin.org/get    # Run tool with parameters
+uv tool run --from httpie http httpbin.org/get  # Run with parameters (httpie's command is `http`)
 uv tool run git+https://github.com/astral-sh/ruff  # Run tool directly from Git
 
 # Install tools globally
@@ -593,7 +598,7 @@ uv pip list --outdated                               # Check for updates
 fzf
 
 # Preview files while searching
-fzf --preview 'bat --color=always {}'
+fzf --preview 'batcat --color=always {}'
 
 # Search command history
 history | fzf
@@ -665,8 +670,8 @@ eget zyedidia/micro --tag nightly
 # Install to specific location
 eget jgm/pandoc --to /usr/local/bin
 
-# Install with asset filtering (avoid musl builds)
-eget ogham/exa --asset ^musl
+# Filter assets by substring (^ = anti-match; here skip musl builds)
+eget eza-community/eza --asset ^musl
 
 # Install for specific system
 eget --system darwin/amd64 sharkdp/fd
@@ -706,7 +711,9 @@ lazygit
 echo "alias lg='lazygit'" >> ~/.zshrc
 
 # Advanced: Change directory on exit
-# If you change repos in lazygit and want your shell to change directory into that repo on exiting lazygit, add this to your ~/.zshrc (or other rc file)
+# Use EITHER the alias above OR this lg() function, not both - a shell alias named lg
+# shadows a same-named function, so the alias would win and the cd-on-exit never runs.
+# If you change repos in lazygit and want your shell to follow it on exit, add this to ~/.zshrc:
 lg()
 {
     export LAZYGIT_NEW_DIR_FILE=~/.lazygit/newdir
@@ -739,7 +746,7 @@ lg()
 - `o` - Open file
 - `s` - Stash changes
 - `i` - Start interactive rebase
-- `r` - Refresh
+- `R` - Refresh
 - `?` - Show keybindings help
 
 **Documentation**:
@@ -776,14 +783,16 @@ echo "alias lzd='lazydocker'" >> ~/.zshrc
 - **docker-compose support** - Full integration with compose services
 
 **Common Keyboard Shortcuts** (inside lazydocker):
-- `[` / `]` - Navigate between containers, images, volumes
+- `[` / `]` - Previous / next tab in the main view (logs, stats, config)
+- `1`-`6` - Focus the projects / containers / images / volumes / networks panels
 - `m` - View container logs
-- `s` - View container stats
-- `e` - Execute shell in container
+- `s` - Stop container
 - `r` - Restart container
+- `p` - Pause container
+- `E` - Execute shell in container
 - `d` - Remove container
-- `p` - Prune unused resources
-- `x` - Execute custom command
+- `b` - Bulk commands menu (includes prune / remove-all)
+- `c` - Run a predefined custom command (`X` for a one-off global command)
 - `?` - Show keybindings help
 
 **Documentation**:
@@ -841,9 +850,9 @@ The script creates/modifies these configuration files:
 - **Supply-chain hardening** (all configs consolidated in `apply_supply_chain_hardening()`, runnable standalone via `--harden-only`):
   - npm: `ignore-scripts=true`, `save-exact=true`, 7-day `min-release-age` quarantine
   - Bun: exact version pinning, 7-day `minimumReleaseAge`, text lockfiles
-  - pip: `prefer-binary=true` (avoids running untrusted `setup.py`)
+  - pip: `prefer-binary=true` (prefers prebuilt wheels, reducing - not eliminating - execution of untrusted `setup.py`)
   - uv: `exclude-newer` 1-week quarantine, `system-certs` (system CA store), system Python preference
-  - Go: `GOPROXY=proxy.golang.org,off`, `GOSUMDB=sum.golang.org` (checksum verification)
+  - Go: `GOPROXY=https://proxy.golang.org,off`, `GOSUMDB=sum.golang.org` (checksum verification)
   - Cargo: `git-fetch-with-cli` (uses system git instead of libgit2), `--locked` on all installs
   - curl: `--proto '=https' --tlsv1.2` enforced on all remote script downloads
   - System-level fallback configs (`/usr/local/etc/npmrc`, `/etc/pip.conf`, `/etc/uv/uv.toml`) for defence-in-depth
@@ -865,17 +874,17 @@ Every tool the script installs, with links to its homepage and docs.
 
 | Tool | Homepage | Documentation |
 |------|----------|---------------|
-| **build-essential** | [Debian Package](https://packages.debian.org/bookworm/build-essential) | [man pages](https://manpages.debian.org/) |
+| **build-essential** | [Debian Package](https://packages.debian.org/trixie/build-essential) | [man pages](https://manpages.debian.org/) |
 | **curl** | [curl.se](https://curl.se/) | [Documentation](https://curl.se/docs/) |
 | **wget** | [GNU Wget](https://www.gnu.org/software/wget/) | [Manual](https://www.gnu.org/software/wget/manual/) |
 | **git** | [git-scm.com](https://git-scm.com/) | [Documentation](https://git-scm.com/doc) |
 | **htop** | [htop.dev](https://htop.dev/) | [man page](https://www.man7.org/linux/man-pages/man1/htop.1.html) |
 | **lsof** | [lsof](https://github.com/lsof-org/lsof) | [man page](https://man7.org/linux/man-pages/man8/lsof.8.html) |
 | **ncdu** | [ncdu](https://dev.yorhel.nl/ncdu) | [man page](https://dev.yorhel.nl/ncdu/man) |
-| **tree** | [tree](http://mama.indstate.edu/users/ice/tree/) | [man page](https://linux.die.net/man/1/tree) |
-| **unp** | [Debian Package](https://packages.debian.org/bookworm/unp) | [man page](https://manpages.debian.org/bookworm/unp/unp.1.en.html) |
-| **exiftool** | [exiftool.org](https://exiftool.org/) | [Documentation](https://exiftool.org/exiftool_pod.html) |
-| **ufw** | [UFW](https://launchpad.net/ufw) | [man page](https://manpages.ubuntu.com/manpages/focal/man8/ufw.8.html) |
+| **tree** | [GitLab](https://gitlab.com/OldManProgrammer/unix-tree) | [man page](https://linux.die.net/man/1/tree) |
+| **unp** | [Debian Package](https://packages.debian.org/trixie/unp) | [man page](https://manpages.debian.org/trixie/unp/unp.1.en.html) |
+| **exiftool** | [exiftool.org](https://exiftool.org/) | [Documentation](https://exiftool.sourceforge.net/exiftool_pod.html) |
+| **ufw** | [UFW](https://launchpad.net/ufw) | [man page](https://manpages.ubuntu.com/manpages/noble/man8/ufw.8.html) |
 
 ### Modern CLI Alternatives
 
@@ -887,7 +896,7 @@ Every tool the script installs, with links to its homepage and docs.
 | **bat** | [GitHub](https://github.com/sharkdp/bat) | [README](https://github.com/sharkdp/bat#usage) |
 | **fzf** | [GitHub](https://github.com/junegunn/fzf) | [README](https://github.com/junegunn/fzf#usage) |
 | **jq** | [jqlang.github.io](https://jqlang.github.io/jq/) | [Manual](https://jqlang.github.io/jq/manual/) |
-| **moreutils** | [joeyh.name](https://joeyh.name/code/moreutils/) | [man pages](https://linux.die.net/man/1/moreutils) |
+| **moreutils** | [joeyh.name](https://joeyh.name/code/moreutils/) | [man pages](https://manpages.debian.org/trixie/moreutils/) |
 | **httpie** | [httpie.io](https://httpie.io/) | [Documentation](https://httpie.io/docs/cli) |
 | **name-that-hash** | [GitHub](https://github.com/HashPals/Name-That-Hash) | [README](https://github.com/HashPals/Name-That-Hash#usage) |
 | **tldr** | [GitHub](https://github.com/tldr-pages/tldr) | [Documentation](https://github.com/tldr-pages/tldr#how-do-i-use-it) |
@@ -937,10 +946,10 @@ Every tool the script installs, with links to its homepage and docs.
 
 | Tool | Homepage | Documentation |
 |------|----------|---------------|
-| **gedit** | [GNOME](https://wiki.gnome.org/Apps/Gedit) | [Help](https://help.gnome.org/users/gedit/stable/) |
+| **gedit** | [gedit-text-editor.org](https://gedit-text-editor.org/) | [Help](https://gedit-text-editor.org/documentation.html) |
 | **meld** | [meldmerge.org](https://meldmerge.org/) | [Help](https://meldmerge.org/) |
 | **Visual Studio Code** | [code.visualstudio.com](https://code.visualstudio.com/) | [Docs](https://code.visualstudio.com/docs) |
-| **xsel** | [xsel](http://www.vergenet.net/~conrad/software/xsel/) | [man page](https://linux.die.net/man/1/xsel) |
+| **xsel** | [GitHub](https://github.com/kfish/xsel) | [man page](https://linux.die.net/man/1/xsel) |
 | **Fira Code Font** | [GitHub](https://github.com/tonsky/FiraCode) | [README](https://github.com/tonsky/FiraCode#fira-code-monospaced-font-with-programming-ligatures) |
 
 ### Kali Linux Specific Tools (Only Installed on Kali)
