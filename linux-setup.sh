@@ -5,7 +5,7 @@
 
 set -eo pipefail
 
-VERSION="2.0"
+VERSION="2.1"
 FORCE_MODE=false
 NO_MODE=false
 NO_HACKING_TOOLS=false
@@ -45,6 +45,7 @@ Interactive Mode (default):
   - Overwriting existing .zshrc configuration
   - Changing default shell to zsh
   - Overwriting existing Terminator configuration
+  - Overwriting existing PowerShell profile
   - Configuring German keyboard layout in XFCE (skip with --no-keyboard-layout)
 
 Force/Yes Mode (--force, --yes, -f, -y):
@@ -415,11 +416,16 @@ has_desktop_environment() {
     return 1
 }
 
-# Detect whether the current terminal has a dark background.
-# Primary: OSC 11 query of the live terminal (what bat/neovim/fish use).
-# Fallback: $COLORFGBG. Returns 0 only when dark is positively detected;
-# returns 1 for light OR undeterminable (so the caller keeps the light theme).
-is_dark_terminal() {
+# Detect the terminal background, storing the result (dark|light|unknown) in the
+# global TERMINAL_BG. Primary: OSC 11 query of the live terminal (what
+# bat/neovim/fish use). Fallback: $COLORFGBG. The result is cached after the
+# first call: the OSC query flips the tty into raw mode, so we only do it once.
+# Sets a global (not echo) so callers must invoke it directly, not via $(...),
+# which would run it in a subshell and discard the cache.
+detect_terminal_background() {
+    if [ -n "${TERMINAL_BG:-}" ]; then return 0; fi
+    TERMINAL_BG="unknown"
+
     local r g b lum reply oldstty bg hr hg hb
 
     # Primary: ask the terminal for its background color (OSC 11, BEL-terminated).
@@ -446,23 +452,38 @@ is_dark_terminal() {
                 [ ${#hb} -eq 1 ] && hb=$hb$hb
                 r=$((16#${hr:0:2})); g=$((16#${hg:0:2})); b=$((16#${hb:0:2}))
                 lum=$(( (299*r + 587*g + 114*b) / 1000 ))   # BT.601, 0..255
-                [ "$lum" -lt 128 ] && return 0   # dark
-                return 1                          # light (positively)
+                if [ "$lum" -lt 128 ]; then TERMINAL_BG="dark"; else TERMINAL_BG="light"; fi
             fi
         fi
     fi
 
     # Fallback: COLORFGBG = "fg;bg" (or "fg;default;bg"); low bg index => dark.
     # Require a ';' so a single-field (foreground-only) value isn't read as bg.
-    if [ -n "${COLORFGBG:-}" ] && [[ "$COLORFGBG" == *";"* ]]; then
+    if [ "$TERMINAL_BG" = "unknown" ] && [ -n "${COLORFGBG:-}" ] && [[ "$COLORFGBG" == *";"* ]]; then
         bg="${COLORFGBG##*;}"
         case "$bg" in
-            0|1|2|3|4|5|6|8) return 0 ;;   # dark background
-            7|9|1[0-5])      return 1 ;;   # light background
+            0|1|2|3|4|5|6|8) TERMINAL_BG="dark" ;;
+            7|9|1[0-5])      TERMINAL_BG="light" ;;
         esac
     fi
 
-    return 1   # inconclusive -> treat as light, keep the theme
+    return 0
+}
+
+# Convenience wrapper: true (0) only when the background is positively dark.
+# Light OR undeterminable -> false, so callers that default to a light theme
+# (e.g. bat's Coldark-Cold) keep it unless dark is positively detected.
+is_dark_terminal() {
+    detect_terminal_background
+    [ "$TERMINAL_BG" = "dark" ]
+}
+
+# Convenience wrapper: true (0) only when the background is positively light.
+# Undeterminable -> false, so callers that default to dark (e.g. the PowerShell
+# profile) keep those defaults unless light is positively detected.
+is_light_terminal() {
+    detect_terminal_background
+    [ "$TERMINAL_BG" = "light" ]
 }
 
 # Convert version string to comparable number: "1.85" -> 185, "" -> 0
@@ -1533,6 +1554,137 @@ if [ ! -f ~/.hushlogin ]; then
     touch ~/.hushlogin
 else
     log "~/.hushlogin already exists"
+fi
+
+# Configure PowerShell profile (light/dark-aware theme + cross-version QoL).
+# Written even if pwsh isn't installed yet, so it's ready when it is. The profile
+# itself works on Windows PowerShell 5.1 and PowerShell 7.2+, Windows and Linux.
+PWSH_PROFILE="$HOME/.config/powershell/profile.ps1"
+OVERWRITE_PWSH=true
+if [ -f "$PWSH_PROFILE" ]; then
+    if prompt_yes_no "Overwrite existing PowerShell profile?" "N"; then
+        backup_file "$PWSH_PROFILE"
+    else
+        OVERWRITE_PWSH=false
+        log "Keeping existing PowerShell profile"
+    fi
+fi
+
+if [ "$OVERWRITE_PWSH" = true ]; then
+    log "Configuring PowerShell profile..."
+    mkdir -p "$HOME/.config/powershell"
+
+    # Base quality-of-life settings (always written).
+    cat > "$PWSH_PROFILE" << 'PWSHEOF'
+# PowerShell profile - managed by linux-setup.sh
+# UTF-8 for correct ANSI/glyph rendering. Wrapped: setting console encoding can
+# throw when stdout is redirected / no real console is attached. Mostly a no-op
+# on PS 7 (already UTF-8) but fixes glyphs on Windows PowerShell 5.1.
+try {
+    $OutputEncoding = [Console]::OutputEncoding = [Text.UTF8Encoding]::new()
+    [Console]::InputEncoding = [Text.UTF8Encoding]::new()
+} catch {}
+
+# ls-style helpers (-Force shows hidden; -Hidden alone would show ONLY hidden)
+function l  { Get-ChildItem @args }
+function la { Get-ChildItem -Force @args }
+function ll { Get-ChildItem -Force @args }
+# This is the All-Hosts profile, so reload that one (not $PROFILE = current-host)
+function Update-Profile { . $PROFILE.CurrentUserAllHosts }
+Set-Alias reload Update-Profile
+
+Import-Module PSReadLine -ErrorAction SilentlyContinue
+$hasPSReadLine = $null -ne (Get-Module PSReadLine)
+if ($hasPSReadLine) {
+    Set-PSReadLineOption -HistoryNoDuplicates -HistorySearchCursorMovesToEnd `
+                         -BellStyle None -MaximumHistoryCount 10000
+    Set-PSReadLineKeyHandler -Key Tab        -Function MenuComplete
+    Set-PSReadLineKeyHandler -Key UpArrow    -Function HistorySearchBackward
+    Set-PSReadLineKeyHandler -Key DownArrow  -Function HistorySearchForward
+    Set-PSReadLineKeyHandler -Chord 'Ctrl+LeftArrow'  -Function BackwardWord
+    Set-PSReadLineKeyHandler -Chord 'Ctrl+RightArrow' -Function ForwardWord
+
+    # Predictive IntelliSense - feature-detect (PSReadLine 2.1+; plugins need 7.2+).
+    # Keep PowerShell's default InlineView (ListView warns in small / VS Code
+    # windows); press F2 to switch to ListView - the ListPrediction colors cover it.
+    if ((Get-Command Set-PSReadLineOption).Parameters.ContainsKey('PredictionSource')) {
+        $src = if ($PSVersionTable.PSVersion -ge [version]'7.2') { 'HistoryAndPlugin' } else { 'History' }
+        Set-PSReadLineOption -PredictionSource $src
+    }
+}
+PWSHEOF
+
+    # Apply the light theme only when the terminal is POSITIVELY light.
+    # PowerShell's built-in colors are dark-optimized, so on an
+    # undeterminable result we keep those defaults (unlike bat, which
+    # defaults to light).
+    if is_light_terminal; then
+        log "Light terminal detected: applying PowerShell light theme"
+        cat >> "$PWSH_PROFILE" << 'PWSHEOF'
+
+# === Light-background theme (a light terminal was detected during setup) ===
+# Colors mimic the PowerShell ISE light theme. PS 7.2+ uses the native $PSStyle
+# API; Windows PowerShell 5.1 falls back to ConsoleColor names (no $PSStyle).
+if ($PSVersionTable.PSVersion -ge [version]'7.2') {
+    $ISETheme = @{
+        Command                  = $PSStyle.Foreground.FromRGB(0x0000FF)
+        Comment                  = $PSStyle.Foreground.FromRGB(0x006400)
+        ContinuationPrompt       = $PSStyle.Foreground.FromRGB(0x0000FF)
+        Default                  = $PSStyle.Foreground.FromRGB(0x0000FF)
+        Emphasis                 = $PSStyle.Foreground.FromRGB(0x287BF0)
+        Error                    = $PSStyle.Foreground.FromRGB(0xE50000)
+        InlinePrediction         = $PSStyle.Foreground.FromRGB(0x93A1A1)
+        Keyword                  = $PSStyle.Foreground.FromRGB(0x00008b)
+        ListPrediction           = $PSStyle.Foreground.FromRGB(0x06DE00)
+        Member                   = $PSStyle.Foreground.FromRGB(0x000000)
+        Number                   = $PSStyle.Foreground.FromRGB(0x800080)
+        Operator                 = $PSStyle.Foreground.FromRGB(0x757575)
+        Parameter                = $PSStyle.Foreground.FromRGB(0x000080)
+        String                   = $PSStyle.Foreground.FromRGB(0x8b0000)
+        Type                     = $PSStyle.Foreground.FromRGB(0x008080)
+        Variable                 = $PSStyle.Foreground.FromRGB(0xff4500)
+        ListPredictionSelected   = $PSStyle.Background.FromRGB(0x93A1A1)
+        Selection                = $PSStyle.Background.FromRGB(0x00BFFF)
+    }
+    if ($hasPSReadLine) { Set-PSReadLineOption -Colors $ISETheme }
+
+    # Text formatting colors
+    $PSStyle.Formatting.FormatAccent       = $PSStyle.Foreground.Green
+    $PSStyle.Formatting.TableHeader        = $PSStyle.Foreground.Green
+    $PSStyle.Formatting.ErrorAccent        = $PSStyle.Foreground.Cyan
+    $PSStyle.Formatting.Error              = $PSStyle.Foreground.Red
+    $PSStyle.Formatting.Warning            = $PSStyle.Foreground.Yellow
+    $PSStyle.Formatting.Verbose            = $PSStyle.Foreground.Yellow
+    $PSStyle.Formatting.Debug              = $PSStyle.Foreground.Yellow
+    $PSStyle.Progress.Style                = $PSStyle.Foreground.Yellow
+
+    # File system colors (listing files)
+    $PSStyle.FileInfo.Directory            = $PSStyle.Background.FromRgb(0x2f6aff) + $PSStyle.Foreground.BrightWhite
+    $PSStyle.FileInfo.SymbolicLink         = $PSStyle.Foreground.Cyan
+    $PSStyle.FileInfo.Executable           = $PSStyle.Foreground.BrightMagenta
+    $PSStyle.FileInfo.Extension['.ps1']    = $PSStyle.Foreground.Cyan
+    $PSStyle.FileInfo.Extension['.ps1xml'] = $PSStyle.Foreground.Cyan
+    $PSStyle.FileInfo.Extension['.psd1']   = $PSStyle.Foreground.Cyan
+    $PSStyle.FileInfo.Extension['.psm1']   = $PSStyle.Foreground.Cyan
+} elseif ($hasPSReadLine) {
+    # Windows PowerShell 5.1: dark ConsoleColor names for contrast on white
+    Set-PSReadLineOption -Colors @{
+        Command   = 'DarkBlue'
+        Parameter = 'DarkGray'
+        Operator  = 'Black'
+        String    = 'DarkCyan'
+        Variable  = 'DarkGreen'
+        Type      = 'DarkMagenta'
+        Number    = 'DarkRed'
+        Member    = 'Black'
+        Comment   = 'Gray'
+        Error     = 'Red'
+    }
+}
+PWSHEOF
+    else
+        log "Dark/undetermined terminal: keeping PowerShell default (dark) colors"
+    fi
 fi
 
 # Configure Terminator
