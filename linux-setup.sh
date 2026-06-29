@@ -5,7 +5,7 @@
 
 set -eo pipefail
 
-VERSION="2.1"
+VERSION="2.2"
 FORCE_MODE=false
 NO_MODE=false
 NO_HACKING_TOOLS=false
@@ -46,6 +46,7 @@ Interactive Mode (default):
   - Changing default shell to zsh
   - Overwriting existing Terminator configuration
   - Overwriting existing PowerShell profile
+  - Overwriting existing tmux configuration
   - Configuring German keyboard layout in XFCE (skip with --no-keyboard-layout)
 
 Force/Yes Mode (--force, --yes, -f, -y):
@@ -634,6 +635,7 @@ sudo apt-get install -y \
     moreutils \
     unp \
     htop \
+    tmux \
     ncdu \
     lsof \
     jq \
@@ -1774,6 +1776,60 @@ EOF
     fi
 else
     log "No desktop environment detected - skipping Terminator configuration"
+fi
+
+# Configure tmux (self-contained sensible defaults, emacs keybindings).
+# tmux is a headless CLI tool, so this is written regardless of desktop.
+log "Configuring tmux..."
+OVERWRITE_TMUX=true
+if [ -f ~/.tmux.conf ]; then
+    if prompt_yes_no "Overwrite existing tmux config?" "N"; then
+        backup_file ~/.tmux.conf
+    else
+        OVERWRITE_TMUX=false
+        log "Keeping existing tmux config"
+    fi
+fi
+
+if [ "$OVERWRITE_TMUX" = true ]; then
+cat > ~/.tmux.conf << 'EOF'
+# tmux configuration - managed by linux-setup.sh
+# Self-contained sensible defaults; no plugin manager, no network deps.
+
+# --- Keys: emacs everywhere (matches zsh's emacs-style line editing) ---
+set -g mode-keys emacs       # copy-mode navigation/selection
+set -g status-keys emacs     # command-prompt editing
+# Prefix stays at the default C-b (C-a is emacs/readline beginning-of-line).
+
+# --- General behaviour ---
+set -g mouse on              # click panes, drag borders, wheel-scroll
+set -g history-limit 50000   # large scrollback for long command output
+set -s escape-time 0         # no lag after pressing Esc
+set -g focus-events on       # let apps (e.g. editors) see focus in/out
+set -g display-time 4000     # status messages stay readable (4s)
+set -g status-interval 5     # refresh the status line every 5s
+setw -g aggressive-resize on
+
+# --- Windows/panes start at 1, renumber on close ---
+set -g base-index 1
+setw -g pane-base-index 1
+set -g renumber-windows on
+
+# --- Colour: 256-colour + truecolor passthrough ---
+set -g default-terminal "tmux-256color"
+set -ag terminal-overrides ",xterm-256color:RGB,*256col*:RGB"
+
+# --- System clipboard (OSC 52); 'on' lets apps inside tmux set the host clipboard ---
+set -s set-clipboard on
+
+# --- New windows/splits open in the current pane's directory (keep default keys) ---
+bind c   new-window      -c "#{pane_current_path}"
+bind '"' split-window -v -c "#{pane_current_path}"
+bind %   split-window -h -c "#{pane_current_path}"
+
+# --- Quick reload ---
+bind r source-file ~/.tmux.conf \; display-message "tmux.conf reloaded"
+EOF
 fi
 
 if is_kali_linux && [ "$NO_HACKING_TOOLS" != true ]; then

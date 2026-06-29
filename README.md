@@ -36,6 +36,7 @@
   - [gitsnip - Download Specific Folders from Git Repositories](#gitsnip---download-specific-folders-from-git-repositories)
   - [lazygit - Terminal UI for Git Commands](#lazygit---terminal-ui-for-git-commands)
   - [lazydocker - Terminal UI for Docker](#lazydocker---terminal-ui-for-docker)
+  - [tmux (Terminal Multiplexer)](#tmux-terminal-multiplexer)
 - [Configuration Files](#configuration-files)
 - [Security Considerations](#security-considerations)
 - [Compatibility](#compatibility)
@@ -106,6 +107,7 @@ By default, the script will prompt you for confirmation on certain actions:
 - Overwriting existing `.zshrc` configuration (default: Yes)
 - Changing default shell to zsh (default: Yes)
 - Overwriting existing Terminator configuration (default: No)
+- Overwriting existing tmux configuration (default: No)
 - Configuring German keyboard layout in XFCE (default: No; skip entirely with `--no-keyboard-layout`)
 
 **Notes:**
@@ -803,12 +805,35 @@ echo "alias lzd='lazydocker'" >> ~/.zshrc
 **Official Video Tutorials**:
 - [Demo & Basic Tutorial](https://youtu.be/NICqQPxwJWw) - Introduction and walkthrough
 
+### tmux (Terminal Multiplexer)
+
+The script writes a self-contained `~/.tmux.conf` with no plugin manager and no network dependency. It uses **emacs** key bindings to match the shell's emacs-style line editing, and leaves the default `Ctrl+B` prefix alone so the shell's `Ctrl+A` (beginning-of-line) still works.
+
+**What it configures:**
+- **emacs keys** in copy mode and at the command prompt (`mode-keys` / `status-keys`)
+- **Mouse support** - click a pane, drag a border, or scroll the wheel
+- **50,000-line scrollback** so long output doesn't scroll away
+- **Truecolor** (24-bit) via `tmux-256color` + `RGB`
+- **System clipboard** (OSC 52) - copies reach the host clipboard, even over SSH
+- **Windows and panes numbered from 1**, and renumbered when one closes
+- **New windows and splits open in the current directory** (the default `c` / `"` / `%` keys)
+- Instant `Esc` (no key-sequence delay) and focus events for editors
+
+**Handy keys** (default prefix `Ctrl+B`):
+- `prefix` + `r` - reload the config
+- `prefix` + `"` / `%` - split horizontally / vertically
+- `prefix` + `c` - new window
+- `prefix` + `[` - enter copy mode (emacs navigation; `Ctrl+Space` starts a selection, `Ctrl+W` copies)
+
+> **Note**: `set-clipboard on` also lets a program running inside a pane overwrite your system clipboard. Switch it to `external` in `~/.tmux.conf` for the stricter default.
+
 ## Configuration Files
 
 The script creates/modifies these configuration files:
 
 **Shell & Terminal:**
 - `~/.zshrc` - Enhanced Zsh configuration with custom aliases and integrations
+- `~/.tmux.conf` - tmux terminal multiplexer settings
 - `~/.config/terminator/config` - Terminator terminal settings
 - `~/.config/terminator/plugins/tab_numbers.py` - Tab numbers plugin for Terminator
 - `~/.config/gtk-3.0/gtk.css` - GTK terminal padding configuration (8px)
@@ -915,6 +940,7 @@ Every tool the script installs, with links to its homepage and docs.
 | **up** | [GitHub](https://github.com/akavel/up) | [README](https://github.com/akavel/up#usage) |
 | **lazygit** | [GitHub](https://github.com/jesseduffield/lazygit) | [Documentation](https://github.com/jesseduffield/lazygit#readme) |
 | **terminator** | [terminator-gtk3](https://gnome-terminator.org/) | [Documentation](https://gnome-terminator.readthedocs.io/) |
+| **tmux** | [GitHub](https://github.com/tmux/tmux) | [Wiki](https://github.com/tmux/tmux/wiki) |
 
 ### Programming Languages & Runtimes
 
