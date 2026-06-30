@@ -816,13 +816,16 @@ The script writes a self-contained `~/.tmux.conf` with no plugin manager and no 
 - **Truecolor** (24-bit) via `tmux-256color` + `RGB`
 - **System clipboard** (OSC 52) - copies reach the host clipboard, even over SSH
 - **Windows and panes numbered from 1**, and renumbered when one closes
-- **New windows and splits open in the current directory** (the default `c` / `"` / `%` keys)
+- **New windows and splits open in the current directory**
+- **Custom window names stay put** - a name you set with `prefix ,` isn't overwritten by the running program
 - Instant `Esc` (no key-sequence delay) and focus events for editors
 
 **Handy keys** (default prefix `Ctrl+B`):
 - `prefix` + `r` - reload the config
-- `prefix` + `"` / `%` - split horizontally / vertically
+- `prefix` + `-` or `"` - split into top and bottom panes
+- `prefix` + `|` or `%` - split into left and right panes
 - `prefix` + `c` - new window
+- `prefix` + `,` - rename the current window (the name sticks)
 - `prefix` + `[` - enter copy mode (emacs navigation; `Ctrl+Space` starts a selection, `Ctrl+W` copies)
 
 > **Note**: `set-clipboard on` also lets a program running inside a pane overwrite your system clipboard. Switch it to `external` in `~/.tmux.conf` for the stricter default.

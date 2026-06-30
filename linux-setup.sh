@@ -1814,6 +1814,7 @@ setw -g aggressive-resize on
 set -g base-index 1
 setw -g pane-base-index 1
 set -g renumber-windows on
+set -g allow-rename off       # keep custom window names (set via prefix ,) from being overridden
 
 # --- Colour: 256-colour + truecolor passthrough ---
 set -g default-terminal "tmux-256color"
@@ -1822,10 +1823,13 @@ set -ag terminal-overrides ",xterm-256color:RGB,*256col*:RGB"
 # --- System clipboard (OSC 52); 'on' lets apps inside tmux set the host clipboard ---
 set -s set-clipboard on
 
-# --- New windows/splits open in the current pane's directory (keep default keys) ---
+# --- New windows/splits open in the current pane's directory ---
+# Default split keys (" and %) are kept; | and - added as intuitive aliases.
 bind c   new-window      -c "#{pane_current_path}"
 bind '"' split-window -v -c "#{pane_current_path}"
 bind %   split-window -h -c "#{pane_current_path}"
+bind |   split-window -h -c "#{pane_current_path}"
+bind -   split-window -v -c "#{pane_current_path}"
 
 # --- Quick reload ---
 bind r source-file ~/.tmux.conf \; display-message "tmux.conf reloaded"
