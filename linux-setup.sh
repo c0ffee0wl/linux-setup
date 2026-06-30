@@ -5,7 +5,7 @@
 
 set -eo pipefail
 
-VERSION="2.2"
+VERSION="2.3"
 FORCE_MODE=false
 NO_MODE=false
 NO_HACKING_TOOLS=false
@@ -1824,12 +1824,14 @@ set -ag terminal-overrides ",xterm-256color:RGB,*256col*:RGB"
 set -s set-clipboard on
 
 # --- New windows/splits open in the current pane's directory ---
-# Default split keys (" and %) are kept; | and - added as intuitive aliases.
+# Default split keys (" and %) are kept; |/- and y/a added as intuitive aliases.
 bind c   new-window      -c "#{pane_current_path}"
 bind '"' split-window -v -c "#{pane_current_path}"
 bind %   split-window -h -c "#{pane_current_path}"
 bind |   split-window -h -c "#{pane_current_path}"
 bind -   split-window -v -c "#{pane_current_path}"
+bind y   split-window -v -c "#{pane_current_path}"
+bind a   split-window -h -c "#{pane_current_path}"
 
 # --- Quick reload ---
 bind r source-file ~/.tmux.conf \; display-message "tmux.conf reloaded"
