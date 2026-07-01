@@ -5,7 +5,7 @@
 
 set -eo pipefail
 
-VERSION="2.3"
+VERSION="2.4"
 FORCE_MODE=false
 NO_MODE=false
 NO_HACKING_TOOLS=false
@@ -504,6 +504,30 @@ get_go_version() {
     version_to_num "$go_version"
 }
 
+# Per-tool minimum apt versions (compared via version_to_num, e.g. "0.9" -> 9).
+# Decide apt-vs-source per tool; keep in sync with the install calls further down.
+ZOXIDE_MIN=9      # zoxide >= 0.9  (Debian <=12 / Ubuntu 22.04 ship 0.4.3)
+SD_MIN=7          # sd     >= 0.7  (bookworm's 0.7.6 is usable; older/absent -> build)
+DELTA_MIN=16      # delta  >= 0.16 (Ubuntu 24.04 LTS ships 0.16.5)
+LAZYGIT_MIN=50    # lazygit>= 0.50 (Debian 13 / Kali have it; older -> go install)
+YQ_MIN=400        # yq-go  >= 4.0  (mikefarah yq; Kali/sid ship 4.53)
+
+# apt candidate version of a package as a comparable number (0 if not in archive)
+apt_candidate_version_num() {
+    local v
+    v=$(apt-cache policy "$1" 2>/dev/null | grep -oP 'Candidate:\s*\K[0-9]+\.[0-9]+' | head -1 || true)
+    version_to_num "$v"
+}
+
+# True if the apt candidate for $1 has a version number >= $2
+apt_meets_min() { [ "$(apt_candidate_version_num "$1")" -ge "$2" ]; }
+
+# Remove stale source-built copies of a binary so the apt copy wins on PATH.
+# REQUIRED because .zshrc puts ~/.cargo/bin and ~/go/bin BEFORE /usr/bin and
+# /usr/local/bin, so a leftover cargo/go binary would otherwise shadow the
+# apt-installed one when this script is re-run over a previous install.
+remove_source_builds() { rm -f "$HOME/go/bin/$1" "$HOME/.cargo/bin/$1" 2>/dev/null || true; }
+
 # Install Go tool
 # Usage: install_go_tool <tool-name> <go-package-path>
 install_go_tool() {
@@ -522,23 +546,69 @@ install_go_tool() {
     go install -v "$package_path"
 }
 
-# Install Cargo tool via apt with cargo fallback
-# Usage: install_cargo_tool <binary-name> <apt-package> <cargo-crate>
+# Install an apt package if not already present (idempotent, with logging).
+# Usage: install_apt_package <display-name> <apt-package>
+install_apt_package() {
+    local display="$1"
+    local apt_pkg="$2"
+    if ! dpkg -s "$apt_pkg" &> /dev/null; then
+        log "Installing ${display} from apt (${apt_pkg})..."
+        sudo apt-get install -y "$apt_pkg"
+    else
+        log "${display} already installed from apt (${apt_pkg})"
+    fi
+}
+
+# Install Go tool: prefer a recent-enough apt package, else build via 'go install'.
+# Usage: install_go_tool_apt <bin> <apt-pkg> <min_num> <go-package-path> [apt_bin] [min_go]
+#   apt_bin: the executable the apt package installs, if it differs from <bin>
+#            (e.g. the 'yq-go' package installs 'yq-go'); a /usr/local/bin/<bin>
+#            symlink is created so <bin> resolves to it.
+#   min_go:  minimum get_go_version needed to build from source in the fallback.
+install_go_tool_apt() {
+    local bin="$1"
+    local apt_pkg="$2"
+    local min_num="$3"
+    local go_pkg="$4"
+    local apt_bin="${5:-$1}"
+    local min_go="${6:-0}"
+
+    if apt_meets_min "$apt_pkg" "$min_num"; then
+        install_apt_package "$bin" "$apt_pkg"
+        # Expose an apt binary under its expected name (e.g. yq -> yq-go).
+        # /usr/local/bin precedes /usr/bin, so this also shadows any same-named
+        # unrelated package (e.g. the Python 'yq').
+        if [ "$apt_bin" != "$bin" ] && command -v "$apt_bin" &> /dev/null; then
+            sudo ln -sf "$(command -v "$apt_bin")" "/usr/local/bin/${bin}"
+        fi
+        remove_source_builds "$bin"   # drop stale ~/go/bin copy so apt wins on PATH
+    elif [ "$(get_go_version)" -ge "$min_go" ]; then
+        install_go_tool "$bin" "$go_pkg"
+    else
+        warn "${bin}: no recent apt package and Go too old to build - skipping"
+    fi
+}
+
+# Install Cargo tool: prefer a recent-enough apt package, else build via cargo.
+# Usage: install_cargo_tool <binary-name> <apt-package> <cargo-crate> [min_num]
 install_cargo_tool() {
     local bin_name="$1"
     local apt_pkg="$2"
     local cargo_crate="$3"
+    local min_num="${4:-0}"
 
-    if ! command -v "$bin_name" &> /dev/null; then
-        log "Installing ${bin_name}..."
-        sudo apt-get install -y "$apt_pkg" || cargo install "$cargo_crate" --locked
-    else
-        if [ -f "$HOME/.cargo/bin/$bin_name" ]; then
-            log "Checking ${bin_name} for updates..."
-            cargo install "$cargo_crate" --locked
+    if apt_meets_min "$apt_pkg" "$min_num"; then
+        install_apt_package "$bin_name" "$apt_pkg"
+        remove_source_builds "$bin_name"   # drop stale ~/.cargo/bin copy so apt wins on PATH
+    elif command -v cargo &> /dev/null; then
+        if ! command -v "$bin_name" &> /dev/null; then
+            log "Installing ${bin_name} via cargo..."
         else
-            log "${bin_name} is already installed (apt-managed, updated via dist-upgrade)"
+            log "Checking ${bin_name} for updates (cargo)..."
         fi
+        cargo install "$cargo_crate" --locked
+    else
+        warn "${bin_name}: apt package too old/absent and cargo unavailable - skipping"
     fi
 }
 
@@ -651,7 +721,10 @@ sudo apt-get install -y \
     zsh-autosuggestions \
     zsh-syntax-highlighting
 
-# Install Rust - either from repo (if >= 1.85) or via rustup
+# Install Rust - either from repo (if >= 1.85) or via rustup. Rust is always
+# installed as a dev runtime; zoxide/sd/delta still prefer apt when it ships a
+# recent-enough build (see install_cargo_tool below) and only fall back to
+# compiling via cargo.
 log "Checking Rust version in repositories..."
 REPO_RUST_VERSION=$(apt-cache policy rustc 2>/dev/null | grep -oP 'Candidate:\s*\K[0-9]+\.[0-9]+' | head -1 || true)
 if [ -z "$REPO_RUST_VERSION" ]; then
@@ -945,28 +1018,26 @@ MINIMUM_GO_VERSION=124  # Go 1.24
 
 install_go_tool "eget" "github.com/zyedidia/eget@latest"
 
-# lazygit, lazydocker, gitsnip and yq require Go 1.24+
+# yq and lazygit: prefer a recent apt package, else build with 'go install'
+# (needs Go 1.24+). yq's apt package is 'yq-go' (binary yq-go); we symlink 'yq'.
+install_go_tool_apt "yq"      "yq-go"   "$YQ_MIN"      "github.com/mikefarah/yq/v4@latest"       "yq-go"   "$MINIMUM_GO_VERSION"
+install_go_tool_apt "lazygit" "lazygit" "$LAZYGIT_MIN" "github.com/jesseduffield/lazygit@latest" "lazygit" "$MINIMUM_GO_VERSION"
+
+# lazydocker and gitsnip are not packaged in Debian/Ubuntu/Kali - always build (Go 1.24+)
 if [ "$GO_VERSION" -ge "$MINIMUM_GO_VERSION" ]; then
-    install_go_tool "yq" "github.com/mikefarah/yq/v4@latest"
-    install_go_tool "lazygit" "github.com/jesseduffield/lazygit@latest"
     install_go_tool "lazydocker" "github.com/jesseduffield/lazydocker@latest"
     install_go_tool "gitsnip" "github.com/dagimg-dot/gitsnip/cmd/gitsnip@latest"
 else
     GO_VERSION_STR=$(go version 2>/dev/null | grep -oP 'go\K[0-9]+\.[0-9]+' | head -1 || true)
-    warn "Skipping yq, lazygit, lazydocker and gitsnip - require Go 1.24+, found Go ${GO_VERSION_STR:-unknown}"
+    warn "Skipping lazydocker and gitsnip - require Go 1.24+, found Go ${GO_VERSION_STR:-unknown}"
 fi
 
 
-# Install or update zoxide (smarter cd)
-if ! command -v zoxide &> /dev/null; then
-    log "Installing zoxide..."
-else
-    log "Checking zoxide for updates..."
-fi
-cargo install zoxide --locked
-
-install_cargo_tool "sd" "sd" "sd"
-install_cargo_tool "delta" "git-delta" "git-delta"
+# Install zoxide, sd and delta: prefer a recent apt package (skips the cargo
+# compile), else build via cargo.
+install_cargo_tool "zoxide" "zoxide"    "zoxide"    "$ZOXIDE_MIN"
+install_cargo_tool "sd"     "sd"        "sd"        "$SD_MIN"
+install_cargo_tool "delta"  "git-delta" "git-delta" "$DELTA_MIN"
 
 # Configure delta as git pager
 if command -v delta &> /dev/null; then
