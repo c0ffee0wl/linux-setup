@@ -5,7 +5,7 @@
 
 set -eo pipefail
 
-VERSION="2.4"
+VERSION="2.4.1"
 FORCE_MODE=false
 NO_MODE=false
 NO_HACKING_TOOLS=false
@@ -786,10 +786,16 @@ if [ -x "$BUN_BIN/bun" ]; then
     # npx is a wrapper, not a symlink: bun's argv[0] sniffing only recognises
     # "bunx"/"node", so a symlink invoked as "npx" runs `bun <arg>` and fails
     # with `Script not found`. The wrapper calls `bun x` explicitly.
-    install -m 755 /dev/stdin "$BUN_BIN/npx" << NPX_EOF
+    # Write via cat+chmod rather than `install /dev/stdin`: re-opening the
+    # heredoc through /proc/self/fd/0 is not portable and fails on Ubuntu 26.04
+    # (bash 5.3 delivers small heredocs as pipes). rm -f first so a pre-existing
+    # symlink from an older run is replaced, not followed.
+    rm -f "$BUN_BIN/npx"
+    cat > "$BUN_BIN/npx" << NPX_EOF
 #!/bin/sh
 exec "$BUN_BIN/bun" x "\$@"
 NPX_EOF
+    chmod 755 "$BUN_BIN/npx"
     log "Created node symlink and npx wrapper in $BUN_BIN"
 else
     warn "Bun binary not found at $BUN_BIN/bun, skipping Node.js compatibility shims"
@@ -1612,7 +1618,7 @@ fi
 log "Checking default shell..."
 if [[ "$SHELL" != "/usr/bin/zsh" && "$SHELL" != "/bin/zsh" ]]; then
     if prompt_yes_no "Change default shell to zsh?" "Y"; then
-        sudo chsh -s "$(which zsh)" "$USER"
+        sudo chsh -s "$(command -v zsh)" "$USER"
         log "Default shell changed to zsh. You'll need to log out and back in for the change to take effect."
     else
         log "Keeping current shell: $SHELL"
