@@ -786,10 +786,13 @@ if [ -x "$BUN_BIN/bun" ]; then
     # npx is a wrapper, not a symlink: bun's argv[0] sniffing only recognises
     # "bunx"/"node", so a symlink invoked as "npx" runs `bun <arg>` and fails
     # with `Script not found`. The wrapper calls `bun x` explicitly.
-    # Write via cat+chmod rather than `install /dev/stdin`: re-opening the
-    # heredoc through /proc/self/fd/0 is not portable and fails on Ubuntu 26.04
-    # (bash 5.3 delivers small heredocs as pipes). rm -f first so a pre-existing
-    # symlink from an older run is replaced, not followed.
+    # Write via cat+chmod rather than `install /dev/stdin`: Ubuntu 25.10+/26.04
+    # default to uutils (Rust) coreutils, whose install/cp can't copy /dev/stdin
+    # when it's a pipe (it resolves to /proc/self/fd/pipe:[...] -> "No such file
+    # or directory"; uutils #5080). bash delivers small heredocs as pipes (since
+    # 5.1), so this hits the npx shim. GNU install handles it, hence this only
+    # breaks on newer Ubuntu. rm -f first so a pre-existing symlink from an older
+    # run is replaced, not followed.
     rm -f "$BUN_BIN/npx"
     cat > "$BUN_BIN/npx" << NPX_EOF
 #!/bin/sh

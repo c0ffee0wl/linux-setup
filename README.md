@@ -891,7 +891,7 @@ The script creates/modifies these configuration files:
 |-------------|---------|-------|
 | Kali Linux  | ✅ Full support | All features enabled |
 | Debian      | ✅ Compatible | Pentesting tools skipped. Tested: 12, 13 |
-| Ubuntu      | ✅ Compatible | Pentesting tools skipped. Tested: 22.04 LTS, 24.04 LTS |
+| Ubuntu      | ✅ Compatible | Pentesting tools skipped. Tested: 22.04 LTS, 24.04 LTS, 26.04 LTS |
 | Other Debian-based | ⚠️ May work | Not tested |
 
 ## Tools Reference
