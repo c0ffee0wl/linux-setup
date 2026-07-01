@@ -515,7 +515,7 @@ YQ_MIN=400        # yq-go  >= 4.0  (mikefarah yq; Kali/sid ship 4.53)
 # apt candidate version of a package as a comparable number (0 if not in archive)
 apt_candidate_version_num() {
     local v
-    v=$(apt-cache policy "$1" 2>/dev/null | grep -oP 'Candidate:\s*\K[0-9]+\.[0-9]+' | head -1 || true)
+    v=$(apt-cache policy "$1" 2>/dev/null | grep -oP 'Candidate:\s*(?:[0-9]+:)?\K[0-9]+\.[0-9]+' | head -1 || true)
     version_to_num "$v"
 }
 
