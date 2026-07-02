@@ -159,6 +159,7 @@ After running the script:
    go version
    rustc --version
    bun --version
+   pwsh --version
    ```
 
 ## Usage Examples
@@ -954,6 +955,7 @@ Every tool the script installs, with links to its homepage and docs.
 | **Rust (rustc)** | [rust-lang.org](https://www.rust-lang.org/) | [Documentation](https://doc.rust-lang.org/) |
 | **Cargo** | [doc.rust-lang.org](https://doc.rust-lang.org/cargo/) | [Book](https://doc.rust-lang.org/cargo/index.html) |
 | **Bun** | [bun.sh](https://bun.sh/) | [Documentation](https://bun.sh/docs) |
+| **PowerShell** | [learn.microsoft.com/powershell](https://learn.microsoft.com/powershell/) | [Documentation](https://learn.microsoft.com/powershell/scripting/) |
 
 ### Python Package Managers & Tools
 

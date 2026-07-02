@@ -5,7 +5,7 @@
 
 set -eo pipefail
 
-VERSION="2.4.1"
+VERSION="2.5.0"
 FORCE_MODE=false
 NO_MODE=false
 NO_HACKING_TOOLS=false
@@ -511,6 +511,7 @@ SD_MIN=7          # sd     >= 0.7  (bookworm's 0.7.6 is usable; older/absent -> 
 DELTA_MIN=16      # delta  >= 0.16 (Ubuntu 24.04 LTS ships 0.16.5)
 LAZYGIT_MIN=50    # lazygit>= 0.50 (Debian 13 / Kali have it; older -> go install)
 YQ_MIN=400        # yq-go  >= 4.0  (mikefarah yq; Kali/sid ship 4.53)
+PWSH_MIN=700      # powershell >= 7.0 (Kali ships 7.5.x natively; else Microsoft repo)
 
 # apt candidate version of a package as a comparable number (0 if not in archive)
 apt_candidate_version_num() {
@@ -557,6 +558,15 @@ install_apt_package() {
     else
         log "${display} already installed from apt (${apt_pkg})"
     fi
+}
+
+# Install the Microsoft package-signing key (shared by the VS Code and PowerShell repos).
+ensure_microsoft_keyring() {
+    [ -f /usr/share/keyrings/microsoft.gpg ] && return 0
+    command -v gpg &> /dev/null || sudo apt-get install -y gpg
+    curl --proto '=https' --tlsv1.2 -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > /tmp/microsoft.gpg
+    sudo install -m 644 /tmp/microsoft.gpg /usr/share/keyrings/microsoft.gpg
+    rm -f /tmp/microsoft.gpg
 }
 
 # Install Go tool: prefer a recent-enough apt package, else build via 'go install'.
@@ -964,11 +974,8 @@ fi
 if has_desktop_environment; then
     log "Installing Visual Studio Code..."
     if ! command -v code &> /dev/null; then
-        sudo apt-get install -y gpg
-        curl --proto '=https' --tlsv1.2 -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > /tmp/microsoft.gpg
-        sudo install -m 644 /tmp/microsoft.gpg /usr/share/keyrings/microsoft.gpg
-        rm -f /tmp/microsoft.gpg
-        
+        ensure_microsoft_keyring
+
         # Create VSCode sources file
         sudo tee /etc/apt/sources.list.d/vscode.sources > /dev/null << 'EOF'
 Types: deb
@@ -987,6 +994,56 @@ EOF
     fi
 else
     log "No desktop environment detected - skipping Visual Studio Code installation"
+fi
+
+# Install PowerShell (pwsh): prefer the distro's native package (Kali ships one),
+# add Microsoft's prod repo only when apt has no usable candidate.
+log "Installing PowerShell..."
+if ! command -v pwsh &> /dev/null; then
+    if apt_meets_min powershell "$PWSH_MIN"; then
+        # Native repo (Kali) or Microsoft repo already configured
+        install_apt_package "PowerShell" "powershell"
+    else
+        # Determine the Microsoft repo path for this distro, and the newest
+        # Microsoft-supported release to fall back to.
+        . /etc/os-release
+        if is_ubuntu; then
+            PWSH_DISTRO="ubuntu"
+            PWSH_SUITE="${UBUNTU_CODENAME:-$VERSION_CODENAME}"
+            PWSH_FALLBACK_VERSION_ID="24.04"
+            PWSH_FALLBACK_SUITE="noble"
+        else
+            PWSH_DISTRO="debian"
+            PWSH_SUITE="$VERSION_CODENAME"
+            PWSH_FALLBACK_VERSION_ID="12"
+            PWSH_FALLBACK_SUITE="bookworm"
+        fi
+        PWSH_VERSION_ID="$VERSION_ID"
+
+        # Capability probe: Microsoft only publishes the repo for supported
+        # releases. Fall back to the newest supported one when absent
+        # (the powershell deb is a universal package, so this is safe).
+        if ! curl --proto '=https' --tlsv1.2 -fsI \
+            "https://packages.microsoft.com/${PWSH_DISTRO}/${PWSH_VERSION_ID}/prod/dists/${PWSH_SUITE}/Release" > /dev/null; then
+            warn "No Microsoft repo for ${PWSH_DISTRO}/${PWSH_VERSION_ID} - falling back to ${PWSH_DISTRO} ${PWSH_FALLBACK_VERSION_ID} (${PWSH_FALLBACK_SUITE})"
+            PWSH_VERSION_ID="$PWSH_FALLBACK_VERSION_ID"
+            PWSH_SUITE="$PWSH_FALLBACK_SUITE"
+        fi
+
+        ensure_microsoft_keyring
+        sudo tee /etc/apt/sources.list.d/microsoft-prod.sources > /dev/null << EOF
+Types: deb
+URIs: https://packages.microsoft.com/${PWSH_DISTRO}/${PWSH_VERSION_ID}/prod
+Suites: ${PWSH_SUITE}
+Components: main
+Architectures: $(dpkg --print-architecture)
+Signed-By: /usr/share/keyrings/microsoft.gpg
+EOF
+        sudo apt-get update
+        install_apt_package "PowerShell" "powershell"
+    fi
+else
+    log "PowerShell is already installed"
 fi
 
 # Install up tool
