@@ -5,7 +5,7 @@
 
 set -eo pipefail
 
-VERSION="2.5.0"
+VERSION="2.5.1"
 FORCE_MODE=false
 NO_MODE=false
 NO_HACKING_TOOLS=false
@@ -560,11 +560,15 @@ install_apt_package() {
     fi
 }
 
-# Install the Microsoft package-signing key (shared by the VS Code and PowerShell repos).
+# Install the Microsoft package-signing keys (shared by the VS Code and PowerShell
+# repos). Always rebuilt, never cached: Microsoft rotates signing keys
+# (microsoft.asc signs pre-2025 repos like repos/code, microsoft-rolling.asc
+# carries the current and future keys), so a stale keyring breaks apt-get update.
 ensure_microsoft_keyring() {
-    [ -f /usr/share/keyrings/microsoft.gpg ] && return 0
     command -v gpg &> /dev/null || sudo apt-get install -y gpg
-    curl --proto '=https' --tlsv1.2 -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > /tmp/microsoft.gpg
+    curl --proto '=https' --tlsv1.2 -fsSL \
+        https://packages.microsoft.com/keys/microsoft.asc \
+        https://packages.microsoft.com/keys/microsoft-rolling.asc | gpg --dearmor > /tmp/microsoft.gpg
     sudo install -m 644 /tmp/microsoft.gpg /usr/share/keyrings/microsoft.gpg
     rm -f /tmp/microsoft.gpg
 }
@@ -691,6 +695,14 @@ fi
 #############################################################################
 
 log "Starting Linux setup..."
+
+# Refresh the Microsoft signing keys if a previous run configured those repos -
+# a key rotation on packages.microsoft.com would otherwise break the apt-get
+# update below (and with it every re-run of this script).
+if [ -f /etc/apt/sources.list.d/microsoft-prod.sources ] || [ -f /etc/apt/sources.list.d/vscode.sources ]; then
+    log "Refreshing Microsoft repository signing keys..."
+    ensure_microsoft_keyring
+fi
 
 # Update package lists and upgrade system
 log "Updating package lists and upgrading system..."
