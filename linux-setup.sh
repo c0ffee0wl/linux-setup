@@ -5,7 +5,7 @@
 
 set -eo pipefail
 
-VERSION="2.6.0"
+VERSION="2.6.1"
 FORCE_MODE=false
 NO_MODE=false
 NO_HACKING_TOOLS=false
@@ -607,6 +607,26 @@ ensure_microsoft_keyring() {
     rm -f /tmp/microsoft.gpg
 }
 
+# Write the Microsoft prod repo apt sources for the given release path/suite.
+# Usage: write_microsoft_prod_sources <distro> <version_id> <suite>
+write_microsoft_prod_sources() {
+    sudo tee /etc/apt/sources.list.d/microsoft-prod.sources > /dev/null << EOF
+Types: deb
+URIs: https://packages.microsoft.com/$1/$2/prod
+Suites: $3
+Components: main
+Architectures: $(dpkg --print-architecture)
+Signed-By: /usr/share/keyrings/microsoft.gpg
+EOF
+}
+
+# Write the Docker CE apt sources for the given distro/suite.
+# Usage: write_docker_sources <distro> <codename>
+write_docker_sources() {
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/$1 $2 stable" |
+        sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+}
+
 # Install Go tool: prefer a recent-enough apt package, else build via 'go install'.
 # Usage: install_go_tool_apt <bin> <apt-pkg> <min_num> <go-package-path> [apt_bin] [min_go]
 #   apt_bin: the executable the apt package installs, if it differs from <bin>
@@ -964,12 +984,20 @@ if ! command -v docker &> /dev/null; then
     sudo chmod a+r /etc/apt/keyrings/docker.asc
 
     # Add the repository to Apt sources
-    echo \
-      "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/$DOCKER_DISTRO $DOCKER_CODENAME stable" | \
-      sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+    write_docker_sources "$DOCKER_DISTRO" "$DOCKER_CODENAME"
+    apt_get update
+
+    # A new release's dist can exist while its stable channel is still empty
+    # (Ubuntu 24.04 shipped this way at launch), so verify a docker-ce
+    # candidate actually appeared - otherwise fall back and re-update.
+    if [ "$(apt_candidate_version_num docker-ce)" -eq 0 ] && [ "$DOCKER_CODENAME" != "$DOCKER_FALLBACK" ]; then
+        warn "Docker repo for ${DOCKER_DISTRO}/${DOCKER_CODENAME} has no docker-ce package - falling back to ${DOCKER_FALLBACK}"
+        DOCKER_CODENAME="$DOCKER_FALLBACK"
+        write_docker_sources "$DOCKER_DISTRO" "$DOCKER_CODENAME"
+        apt_get update
+    fi
 
     # Install Docker CE and components
-    apt_get update
     apt_get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
     # Enable and start Docker service
@@ -1056,15 +1084,20 @@ if ! command -v pwsh &> /dev/null; then
         fi
 
         ensure_microsoft_keyring
-        sudo tee /etc/apt/sources.list.d/microsoft-prod.sources > /dev/null << EOF
-Types: deb
-URIs: https://packages.microsoft.com/${PWSH_DISTRO}/${PWSH_VERSION_ID}/prod
-Suites: ${PWSH_SUITE}
-Components: main
-Architectures: $(dpkg --print-architecture)
-Signed-By: /usr/share/keyrings/microsoft.gpg
-EOF
+        write_microsoft_prod_sources "$PWSH_DISTRO" "$PWSH_VERSION_ID" "$PWSH_SUITE"
         apt_get update
+
+        # A brand-new release's repo can exist before the powershell package
+        # is published to it (e.g. Ubuntu 26.04 at launch: the resolute repo
+        # answers, but carries no powershell). Verify a candidate actually
+        # appeared - otherwise fall back and re-update.
+        if ! apt_meets_min powershell "$PWSH_MIN" && [ "$PWSH_SUITE" != "$PWSH_FALLBACK_SUITE" ]; then
+            warn "Microsoft repo for ${PWSH_DISTRO}/${PWSH_VERSION_ID} has no powershell package - falling back to ${PWSH_DISTRO} ${PWSH_FALLBACK_VERSION_ID} (${PWSH_FALLBACK_SUITE})"
+            PWSH_VERSION_ID="$PWSH_FALLBACK_VERSION_ID"
+            PWSH_SUITE="$PWSH_FALLBACK_SUITE"
+            write_microsoft_prod_sources "$PWSH_DISTRO" "$PWSH_VERSION_ID" "$PWSH_SUITE"
+            apt_get update
+        fi
         install_apt_package "PowerShell" "powershell"
     fi
 else
