@@ -5,7 +5,7 @@
 
 set -eo pipefail
 
-VERSION="2.5.1"
+VERSION="2.6.0"
 FORCE_MODE=false
 NO_MODE=false
 NO_HACKING_TOOLS=false
@@ -139,14 +139,57 @@ if ! grep -qE "(debian|ID_LIKE.*debian)" /etc/os-release 2>/dev/null; then
     error "This script requires a Debian-based Linux distribution. Detected system is not compatible."
 fi
 
-# Backup a file with timestamp
+# Backup a file with timestamp (--sudo for root-owned paths)
 backup_file() {
+    local sudo_cmd=""
+    if [ "$1" = "--sudo" ]; then sudo_cmd="sudo"; shift; fi
     local file_path="$1"
     if [ -f "$file_path" ]; then
         local backup_path="${file_path}.backup.$(date +'%Y-%m-%d_%H-%M-%S')"
-        cp "$file_path" "$backup_path"
+        $sudo_cmd cp "$file_path" "$backup_path"
         log "Backed up to: $backup_path"
     fi
+}
+
+# Write a config file from stdin, only when its content differs from what is
+# already there; back up the previous version first. Unchanged files are left
+# untouched so re-runs cause no backup churn.
+# Usage: write_config_file [--sudo] <dest> << 'EOF' ... EOF
+write_config_file() {
+    local sudo_cmd=""
+    if [ "$1" = "--sudo" ]; then sudo_cmd="sudo"; shift; fi
+    local dest="$1" tmp
+    tmp=$(mktemp)
+    cat > "$tmp"    # heredoc stdin into a real file (never install /dev/stdin)
+    if [ -f "$dest" ] && cmp -s "$tmp" "$dest"; then
+        rm -f "$tmp"
+        return 0
+    fi
+    backup_file ${sudo_cmd:+--sudo} "$dest"
+    $sudo_cmd install -m 644 "$tmp" "$dest"
+    rm -f "$tmp"
+}
+
+# apt-get wrapper: in force/no mode run fully non-interactively so debconf
+# dialogs, dpkg conffile prompts, and Ubuntu's needrestart menu can't stall
+# unattended runs. sudo resets the environment, so the variables are passed
+# on sudo's command line rather than exported.
+apt_get() {
+    if [[ "$FORCE_MODE" == "true" || "$NO_MODE" == "true" ]]; then
+        sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get \
+            -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold "$@"
+    else
+        sudo apt-get "$@"
+    fi
+}
+
+# True when the vendor publishes an apt suite at <base_url>/dists/<suite>/Release.
+# Used to pick a repo suite by capability instead of maintaining codename lists
+# (Docker and PowerShell repos); bounded timeouts so an unreachable mirror
+# can't stall the run.
+repo_suite_published() {
+    curl --proto '=https' --tlsv1.2 --connect-timeout 5 --max-time 15 -fsI \
+        "$1/dists/$2/Release" > /dev/null 2>&1
 }
 
 # Prompt user with yes/no question
@@ -275,7 +318,7 @@ apply_supply_chain_hardening() {
     # pnpm reads `minimum-release-age` (same ~/.npmrc) in MINUTES. 7 days ==
     # 10080 minutes; both match the uv/bun 7-day cooldown.
     log "Configuring npm security hardening..."
-    cat > "$HOME/.npmrc" << 'EOF'
+    write_config_file "$HOME/.npmrc" << 'EOF'
 ignore-scripts=true
 save-exact=true
 audit=true
@@ -286,7 +329,7 @@ EOF
 
     # --- Bun hardening (user-level) ---
     log "Configuring Bun security hardening..."
-    cat > "$HOME/.bunfig.toml" << 'EOF'
+    write_config_file "$HOME/.bunfig.toml" << 'EOF'
 [install]
 exact = true
 saveTextLockfile = true
@@ -307,13 +350,13 @@ EOF
     log "Configuring Python package manager hardening..."
     mkdir -p "$HOME/.config/uv" "$HOME/.config/pip"
 
-    cat > "$HOME/.config/uv/uv.toml" << 'EOF'
+    write_config_file "$HOME/.config/uv/uv.toml" << 'EOF'
 exclude-newer = "1 week"
 system-certs = true
 python-preference = "system"
 EOF
 
-    cat > "$HOME/.config/pip/pip.conf" << 'EOF'
+    write_config_file "$HOME/.config/pip/pip.conf" << 'EOF'
 [global]
 prefer-binary = true
 
@@ -327,7 +370,7 @@ EOF
     if sudo -n true 2>/dev/null; then
         sudo mkdir -p /usr/local/etc /etc/uv
 
-        sudo tee /usr/local/etc/npmrc > /dev/null << 'EOF'
+        write_config_file --sudo /usr/local/etc/npmrc << 'EOF'
 ignore-scripts=true
 save-exact=true
 audit=true
@@ -336,13 +379,13 @@ min-release-age=7
 minimum-release-age=10080
 EOF
 
-        sudo tee /etc/uv/uv.toml > /dev/null << 'EOF'
+        write_config_file --sudo /etc/uv/uv.toml << 'EOF'
 exclude-newer = "1 week"
 system-certs = true
 python-preference = "system"
 EOF
 
-        sudo tee /etc/pip.conf > /dev/null << 'EOF'
+        write_config_file --sudo /etc/pip.conf << 'EOF'
 [global]
 prefer-binary = true
 
@@ -361,28 +404,20 @@ EOF
     # Universal opt-out signal (proposed standard)
     update_profile_export "DO_NOT_TRACK" "1"
 
-    # VS Code / .NET / PowerShell / Azure
-    update_profile_export "VSCODE_TELEMETRY_DISABLE" "1"
-    update_profile_export "VSCODE_CRASH_REPORTER_DISABLE" "1"
+    # .NET / PowerShell / Azure
     update_profile_export "DOTNET_CLI_TELEMETRY_OPTOUT" "1"
     update_profile_export "POWERSHELL_TELEMETRY_OPTOUT" "1"
     update_profile_export "AZURE_CORE_COLLECT_TELEMETRY" "0"
 
-    # Python packaging tools
-    update_profile_export "PYPI_DISABLE_TELEMETRY" "1"
-    update_profile_export "UV_NO_TELEMETRY" "1"
+    # Scarf download-analytics gateway
     update_profile_export "SCARF_ANALYTICS" "false"
 
     # Hugging Face Hub (huggingface_hub, transformers, datasets)
     update_profile_export "HF_HUB_DISABLE_TELEMETRY" "1"
 
-    # GrowthBook feature-flag/experimentation client
-    update_profile_export "DISABLE_GROWTHBOOK" "1"
-
     # Go module supply-chain hardening
     update_profile_export "GOPROXY" "https://proxy.golang.org,off"
     update_profile_export "GOSUMDB" "sum.golang.org"
-    update_profile_export "GONOSUMCHECK" ""
 
     # Go telemetry opt-out (Go 1.23+ writes mode to ~/.config/go/telemetry/mode)
     command -v go &>/dev/null && go telemetry off 2>/dev/null || true
@@ -543,7 +578,6 @@ install_go_tool() {
     export PATH=$HOME/go/bin:$PATH
     export GOPROXY="https://proxy.golang.org,off"
     export GOSUMDB="sum.golang.org"
-    export GONOSUMCHECK=""
     go install -v "$package_path"
 }
 
@@ -554,7 +588,7 @@ install_apt_package() {
     local apt_pkg="$2"
     if ! dpkg -s "$apt_pkg" &> /dev/null; then
         log "Installing ${display} from apt (${apt_pkg})..."
-        sudo apt-get install -y "$apt_pkg"
+        apt_get install -y "$apt_pkg"
     else
         log "${display} already installed from apt (${apt_pkg})"
     fi
@@ -565,7 +599,7 @@ install_apt_package() {
 # (microsoft.asc signs pre-2025 repos like repos/code, microsoft-rolling.asc
 # carries the current and future keys), so a stale keyring breaks apt-get update.
 ensure_microsoft_keyring() {
-    command -v gpg &> /dev/null || sudo apt-get install -y gpg
+    command -v gpg &> /dev/null || apt_get install -y gpg
     curl --proto '=https' --tlsv1.2 -fsSL \
         https://packages.microsoft.com/keys/microsoft.asc \
         https://packages.microsoft.com/keys/microsoft-rolling.asc | gpg --dearmor > /tmp/microsoft.gpg
@@ -668,7 +702,7 @@ if git rev-parse --git-dir > /dev/null 2>&1; then
     git fetch origin 2>/dev/null || true
 
     # Count commits we don't have that remote has
-    BEHIND=$(git rev-list HEAD..@{u} 2>/dev/null | wc -l || echo "0")
+    BEHIND=$(git rev-list --count HEAD..@{u} 2>/dev/null) || BEHIND=0
 
     if [ "$BEHIND" -gt 0 ]; then
         log "Updates found! Pulling latest changes..."
@@ -706,12 +740,12 @@ fi
 
 # Update package lists and upgrade system
 log "Updating package lists and upgrading system..."
-sudo apt-get update
-sudo apt-get dist-upgrade -y
+apt_get update
+apt_get dist-upgrade -y
 
 # Install essential packages
 log "Installing essential packages..."
-sudo apt-get install -y \
+apt_get install -y \
     ca-certificates \
     build-essential \
     curl \
@@ -760,7 +794,7 @@ log "Repository has Rust version: $REPO_RUST_VERSION (numeric: $REPO_RUST_VERSIO
 
 if ! command -v cargo &> /dev/null && [ "$REPO_RUST_VERSION_NUM" -ge "$MINIMUM_RUST_VERSION" ]; then
     log "Installing Rust from repositories (version $REPO_RUST_VERSION)..."
-    sudo apt-get install -y cargo rustc
+    apt_get install -y cargo rustc
 elif ! command -v cargo &> /dev/null; then
     log "Repository version $REPO_RUST_VERSION is below required $MINIMUM_RUST_VERSION, installing Rust via rustup..."
     install_rust_via_rustup
@@ -835,7 +869,7 @@ apply_supply_chain_hardening
 # Install GUI applications if desktop environment is available
 if has_desktop_environment; then
     log "Desktop environment detected - installing GUI applications"
-    sudo apt-get install -y \
+    apt_get install -y \
         gedit \
         gedit-plugins \
         fonts-firacode \
@@ -846,7 +880,7 @@ if has_desktop_environment; then
     # Configure GTK terminal padding
     log "Configuring GTK terminal padding..."
     mkdir -p ~/.config/gtk-3.0
-    cat > ~/.config/gtk-3.0/gtk.css << 'EOF'
+    write_config_file ~/.config/gtk-3.0/gtk.css << 'EOF'
 VteTerminal, TerminalScreen, vte-terminal {
     padding: 8px 8px 8px 8px; /* Top Right Bottom Left */
     -VteTerminal-inner-border: 8px 8px 8px 8px; /* Older versions might need this */
@@ -859,7 +893,7 @@ fi
 # Install Kali-specific package - only install on Kali Linux
 if is_kali_linux && [ "$NO_HACKING_TOOLS" != true ]; then
     log "Installing hacking tools..."
-    sudo apt-get install -y massdns mitmproxy || true
+    apt_get install -y massdns mitmproxy || true
 else
     warn "Skipping hacking tools installation"
 fi
@@ -868,7 +902,7 @@ fi
 log "Installing pipx..."
 if ! command -v pipx &> /dev/null; then
     #python3 -m pip install --user pipx
-    sudo apt-get install -y pipx
+    apt_get install -y pipx
 else
     log "pipx is already installed"
 fi
@@ -897,55 +931,29 @@ fi
 log "Installing Docker CE..."
 if ! command -v docker &> /dev/null; then
     # Remove conflicting packages
-    for pkg in docker.io docker-doc docker-compose docker-compose-v2 podman-docker containerd runc; do sudo apt-get remove -y "$pkg" || true; done
+    for pkg in docker.io docker-doc docker-compose docker-compose-v2 podman-docker containerd runc; do apt_get remove -y "$pkg" || true; done
 
-    # Detect distribution and codename
+    # Select the Docker repo: Ubuntu uses Docker's ubuntu repo; everything
+    # else Debian-based (Debian, Kali, derivatives) uses the debian repo.
+    . /etc/os-release
     if is_ubuntu; then
-        . /etc/os-release
         DOCKER_DISTRO="ubuntu"
         DOCKER_CODENAME="${UBUNTU_CODENAME:-$VERSION_CODENAME}"
-
-        # Validate against supported Ubuntu versions
-        case "$DOCKER_CODENAME" in
-            resolute|questing|noble|jammy)
-                # Officially supported Ubuntu versions (26.04 LTS, 25.10, 24.04 LTS, 22.04 LTS)
-                ;;
-            *)
-                log "Warning: Ubuntu codename '$DOCKER_CODENAME' is not officially supported by Docker. Falling back to Trixie."
-                DOCKER_DISTRO="debian"
-                DOCKER_CODENAME="trixie"
-                ;;
-        esac
-    elif [ -f /etc/os-release ]; then
-        . /etc/os-release
-
-        if [ "$ID" = "debian" ] || [ "$ID" = "kali" ] || echo "$ID_LIKE" | grep -q "debian"; then
-            DOCKER_DISTRO="debian"
-            DOCKER_CODENAME="$VERSION_CODENAME"
-
-            # Validate against supported Debian versions
-            case "$DOCKER_CODENAME" in
-                trixie|bookworm|bullseye)
-                    # Officially supported Debian versions (13, 12, 11)
-                    ;;
-                kali-rolling)
-                    # Kali uses Debian repos, default to trixie
-                    DOCKER_CODENAME="trixie"
-                    ;;
-                *)
-                    log "Warning: Debian codename '$DOCKER_CODENAME' is not officially supported by Docker. Falling back to Trixie."
-                    DOCKER_CODENAME="trixie"
-                    ;;
-            esac
-        else
-            log "Warning: Unknown distribution '$ID'. Falling back to Debian Trixie."
-            DOCKER_DISTRO="debian"
-            DOCKER_CODENAME="trixie"
-        fi
+        DOCKER_FALLBACK="noble"
     else
-        log "Warning: Cannot detect distribution. Falling back to Debian Trixie."
         DOCKER_DISTRO="debian"
-        DOCKER_CODENAME="trixie"
+        DOCKER_CODENAME="${VERSION_CODENAME:-}"
+        DOCKER_FALLBACK="trixie"
+    fi
+
+    # Capability probe: Docker only publishes dists for releases it supports.
+    # Fall back to the newest supported LTS/stable suite when absent. Skip the
+    # probe where the answer is statically known (kali-rolling is never
+    # published; sid has no VERSION_CODENAME).
+    if [ -z "$DOCKER_CODENAME" ] || [ "$DOCKER_CODENAME" = "kali-rolling" ] || \
+       ! repo_suite_published "https://download.docker.com/linux/${DOCKER_DISTRO}" "$DOCKER_CODENAME"; then
+        log "No Docker repo for ${DOCKER_DISTRO}/${DOCKER_CODENAME:-unknown} - falling back to ${DOCKER_FALLBACK}"
+        DOCKER_CODENAME="$DOCKER_FALLBACK"
     fi
 
     log "Using Docker repository: $DOCKER_DISTRO/$DOCKER_CODENAME"
@@ -961,25 +969,31 @@ if ! command -v docker &> /dev/null; then
       sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
 
     # Install Docker CE and components
-    sudo apt-get update
-    sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    apt_get update
+    apt_get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
     # Enable and start Docker service
     sudo systemctl enable docker || true
     sudo systemctl start docker || true
 
-    log "Docker CE installed and started successfully. You'll need to log out and back in for group changes to take effect."
+    log "Docker CE installed and started successfully"
 else
     log "Docker is already installed"
 fi
 
-# Configure Docker group and permissions
-log "Configuring Docker group and permissions..."
-sudo groupadd docker 2>/dev/null || true
-sudo usermod -aG docker "$USER"
-if [[ -d "$HOME/.docker" ]]; then
-    sudo chown "$USER":"$USER" "$HOME/.docker" -R
-    sudo chmod g+rwx "$HOME/.docker" -R
+# Configure Docker group and permissions (Kali only: docker group membership
+# is root-equivalent, so on other distros it stays opt-in via sudo)
+if is_kali_linux; then
+    log "Configuring Docker group and permissions..."
+    sudo groupadd docker 2>/dev/null || true
+    sudo usermod -aG docker "$USER"
+    if [[ -d "$HOME/.docker" ]]; then
+        sudo chown "$USER":"$USER" "$HOME/.docker" -R
+        sudo chmod g+rwx "$HOME/.docker" -R
+    fi
+    log "Docker group configured. You'll need to log out and back in for group changes to take effect."
+else
+    log "Skipping docker group membership (root-equivalent; add yourself manually with: sudo usermod -aG docker \$USER)"
 fi
 
 # Install Visual Studio Code
@@ -998,9 +1012,9 @@ Architectures: amd64,arm64,armhf
 Signed-By: /usr/share/keyrings/microsoft.gpg
 EOF
         
-        sudo apt-get install -y apt-transport-https
-        sudo apt-get update
-        sudo apt-get install -y code
+        apt_get install -y apt-transport-https
+        apt_get update
+        apt_get install -y code
     else
         log "Visual Studio Code is already installed"
     fi
@@ -1035,8 +1049,7 @@ if ! command -v pwsh &> /dev/null; then
         # Capability probe: Microsoft only publishes the repo for supported
         # releases. Fall back to the newest supported one when absent
         # (the powershell deb is a universal package, so this is safe).
-        if ! curl --proto '=https' --tlsv1.2 -fsI \
-            "https://packages.microsoft.com/${PWSH_DISTRO}/${PWSH_VERSION_ID}/prod/dists/${PWSH_SUITE}/Release" > /dev/null; then
+        if ! repo_suite_published "https://packages.microsoft.com/${PWSH_DISTRO}/${PWSH_VERSION_ID}/prod" "$PWSH_SUITE"; then
             warn "No Microsoft repo for ${PWSH_DISTRO}/${PWSH_VERSION_ID} - falling back to ${PWSH_DISTRO} ${PWSH_FALLBACK_VERSION_ID} (${PWSH_FALLBACK_SUITE})"
             PWSH_VERSION_ID="$PWSH_FALLBACK_VERSION_ID"
             PWSH_SUITE="$PWSH_FALLBACK_SUITE"
@@ -1051,7 +1064,7 @@ Components: main
 Architectures: $(dpkg --print-architecture)
 Signed-By: /usr/share/keyrings/microsoft.gpg
 EOF
-        sudo apt-get update
+        apt_get update
         install_apt_package "PowerShell" "powershell"
     fi
 else
@@ -1147,7 +1160,7 @@ fi
 if has_desktop_environment; then
     log "Setting Terminator as default terminal..."
     mkdir -p ~/.config/xfce4
-    cat > ~/.config/xfce4/helpers.rc << 'EOF'
+    write_config_file ~/.config/xfce4/helpers.rc << 'EOF'
 TerminalEmulator=terminator
 EOF
 else
@@ -1417,7 +1430,8 @@ toggle_oneline_prompt(){
     zle reset-prompt
 }
 zle -N toggle_oneline_prompt
-bindkey ^P toggle_oneline_prompt
+# (Kali's default binds ^P to toggle_oneline_prompt here; the binding is
+# removed in favour of zle-upify below - the widget stays for rebinding)
 
 # If this is an xterm set the title to user@host:dir
 case "$TERM" in
@@ -2047,7 +2061,7 @@ log "Configuring systemd-resolved..."
 if systemctl is-active --quiet systemd-resolved 2>/dev/null; then
     log "systemd-resolved is active, configuring..."
     sudo mkdir -p /etc/systemd/resolved.conf.d/
-    sudo tee /etc/systemd/resolved.conf.d/disable-stub.conf > /dev/null << 'EOF'
+    write_config_file --sudo /etc/systemd/resolved.conf.d/disable-stub.conf << 'EOF'
 [Resolve]
 DNSStubListener=no
 EOF
@@ -2071,8 +2085,8 @@ fi
 
 # Final cleanup
 log "Performing final cleanup..."
-sudo apt-get autoremove -y
-sudo apt-get clean
+apt_get autoremove -y
+apt_get clean
 go clean -cache -modcache || true
 uv cache clean || true
 rm -rf "$HOME/.cargo/registry/cache" "$HOME/.cargo/registry/src" "$HOME/.cargo/git/checkouts" 2>/dev/null || true
