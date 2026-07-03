@@ -5,7 +5,7 @@
 
 set -eo pipefail
 
-VERSION="2.7.0"
+VERSION="2.7.1"
 FORCE_MODE=false
 NO_MODE=false
 NO_HACKING_TOOLS=false
@@ -541,6 +541,7 @@ get_go_version() {
 
 # Per-tool minimum apt versions (compared via version_to_num, e.g. "0.9" -> 9).
 # Decide apt-vs-source per tool; keep in sync with the install calls further down.
+ZOXIDE_MIN=9      # zoxide >= 0.9  (Kali/sid ship 0.9.x; Debian <=12 / Ubuntu 22.04 ship 0.4.3)
 SD_MIN=7          # sd     >= 0.7  (bookworm's 0.7.6 is usable; older/absent -> build)
 DELTA_MIN=16      # delta  >= 0.16 (Ubuntu 24.04 LTS ships 0.16.5)
 LAZYGIT_MIN=50    # lazygit>= 0.50 (Debian 13 / Kali have it; older -> go install)
@@ -1156,18 +1157,25 @@ else
 fi
 
 
-# Install zoxide via the official installer (prebuilt release binary into
-# ~/.local/bin, which .zshrc puts first on PATH). Repo packages lag upstream,
-# so we don't use apt here. Downloaded to a file first so a truncated
-# transfer can never execute partially. Re-run acts as the updater.
-log "Installing/updating zoxide via official install script..."
-ZOXIDE_INSTALLER=$(mktemp)
-curl --proto '=https' --tlsv1.2 -sSfL \
-    https://raw.githubusercontent.com/ajeetdsouza/zoxide/main/install.sh \
-    -o "$ZOXIDE_INSTALLER"
-sh "$ZOXIDE_INSTALLER" --bin-dir "$HOME/.local/bin"
-rm -f "$ZOXIDE_INSTALLER"
-remove_source_builds "zoxide"   # drop stale ~/.cargo/bin copy from old runs
+# Install zoxide: prefer a recent apt package (Kali/sid ship 0.9.x), else the
+# official installer (prebuilt binary into ~/.local/bin, first on PATH; the
+# script is fetched to a file so a truncated transfer can't execute). apt is
+# preferred because the installer's unauthenticated GitHub API call rate-limits
+# per IP and then fails with a misleading "not packaged for your arch" error.
+if apt_meets_min "zoxide" "$ZOXIDE_MIN"; then
+    install_apt_package "zoxide" "zoxide"
+    # Drop a stale installer-placed copy so the apt binary wins on PATH
+    rm -f "$HOME/.local/bin/zoxide"
+else
+    log "Installing/updating zoxide via official install script..."
+    ZOXIDE_INSTALLER=$(mktemp)
+    curl --proto '=https' --tlsv1.2 -sSfL \
+        https://raw.githubusercontent.com/ajeetdsouza/zoxide/main/install.sh \
+        -o "$ZOXIDE_INSTALLER"
+    sh "$ZOXIDE_INSTALLER" --bin-dir "$HOME/.local/bin"
+    rm -f "$ZOXIDE_INSTALLER"
+fi
+remove_source_builds "zoxide"   # drop stale ~/.cargo/bin copies from old runs
 
 # Install sd and delta: prefer a recent apt package (skips the cargo compile),
 # else build via cargo.
