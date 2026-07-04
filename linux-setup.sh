@@ -5,7 +5,7 @@
 
 set -eo pipefail
 
-VERSION="2.7.1"
+VERSION="2.8.0"
 FORCE_MODE=false
 NO_MODE=false
 NO_HACKING_TOOLS=false
@@ -565,15 +565,24 @@ apt_meets_min() { [ "$(apt_candidate_version_num "$1")" -ge "$2" ]; }
 remove_source_builds() { rm -f "$HOME/go/bin/$1" "$HOME/.cargo/bin/$1" 2>/dev/null || true; }
 
 # Install Go tool
-# Usage: install_go_tool <tool-name> <go-package-path>
+# Usage: install_go_tool <tool-name> <go-package-path> [mode]
+#   mode: "update" (default) rebuilds @latest every run.
+#         "once" skips the build when <tool-name> is already on PATH - use for
+#         discontinued/archived upstreams we want to freeze at the installed build
+#         (also avoids pulling @latest from a dormant, hijackable namespace).
 install_go_tool() {
     local tool_name="$1"
     local package_path="$2"
+    local mode="${3:-update}"
 
-    if ! command -v "$tool_name" &> /dev/null; then
-        log "Installing ${tool_name}..."
-    else
+    if command -v "$tool_name" &> /dev/null; then
+        if [ "$mode" = "once" ]; then
+            log "${tool_name} already installed - skipping update (install-once)"
+            return 0
+        fi
         log "Updating ${tool_name}..."
+    else
+        log "Installing ${tool_name}..."
     fi
     export PATH=$HOME/go/bin:$PATH
     export GOPROXY="https://proxy.golang.org,off"
@@ -658,21 +667,28 @@ install_go_tool_apt() {
 }
 
 # Install Cargo tool: prefer a recent-enough apt package, else build via cargo.
-# Usage: install_cargo_tool <binary-name> <apt-package> <cargo-crate> [min_num]
+# Usage: install_cargo_tool <binary-name> <apt-package> <cargo-crate> [min_num] [mode]
+#   mode: "update" (default) or "once" (skip the cargo build when already installed;
+#         for discontinued upstreams). Only affects the cargo fallback path.
 install_cargo_tool() {
     local bin_name="$1"
     local apt_pkg="$2"
     local cargo_crate="$3"
     local min_num="${4:-0}"
+    local mode="${5:-update}"
 
     if apt_meets_min "$apt_pkg" "$min_num"; then
         install_apt_package "$bin_name" "$apt_pkg"
         remove_source_builds "$bin_name"   # drop stale ~/.cargo/bin copy so apt wins on PATH
     elif command -v cargo &> /dev/null; then
-        if ! command -v "$bin_name" &> /dev/null; then
-            log "Installing ${bin_name} via cargo..."
-        else
+        if command -v "$bin_name" &> /dev/null; then
+            if [ "$mode" = "once" ]; then
+                log "${bin_name} already installed - skipping update (install-once)"
+                return 0
+            fi
             log "Checking ${bin_name} for updates (cargo)..."
+        else
+            log "Installing ${bin_name} via cargo..."
         fi
         cargo install "$cargo_crate" --locked
     else
@@ -1104,8 +1120,11 @@ else
     log "PowerShell is already installed"
 fi
 
-# Install up tool
-install_go_tool "up" "github.com/akavel/up@latest"
+# Install up tool. Upstream github.com/akavel/up is discontinued/archived, so
+# freeze the installed build: "once" makes install_go_tool skip the rebuild when
+# 'up' is already on PATH (it lives in /usr/local/bin, always on PATH). This also
+# avoids pulling a potentially hijacked @latest from a dormant namespace.
+install_go_tool "up" "github.com/akavel/up@latest" once
 sudo cp "$HOME/go/bin/up" /usr/local/bin/ 2>/dev/null || true
 
 # Configure AppArmor to allow bwrap to create user namespaces
