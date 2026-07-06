@@ -5,7 +5,7 @@
 
 set -eo pipefail
 
-VERSION="2.8.0"
+VERSION="2.8.1"
 FORCE_MODE=false
 NO_MODE=false
 NO_HACKING_TOOLS=false
@@ -864,34 +864,69 @@ else
     bun upgrade
 fi
 
-# Create node/npx symlinks pointing to bun for Node.js drop-in compatibility
-# Bun only auto-symlinks node temporarily during `bun run` (in /tmp/bun-node/);
-# these permanent symlinks make `node` and `npx` work system-wide for scripts,
-# shebangs (#!/usr/bin/env node), and tools that invoke node/npx directly.
-# Note: npm is NOT symlinked — bun's package manager uses its own CLI interface
+# Create node/npx shims pointing to bun for Node.js drop-in compatibility, but
+# ONLY when the system has no real node/npx of its own. Bun only auto-symlinks
+# node temporarily during `bun run` (in /tmp/bun-node/); these permanent shims
+# make `node` and `npx` work system-wide for scripts, shebangs
+# (#!/usr/bin/env node), and tools that invoke node/npx directly. Because
+# ~/.bun/bin sits ahead of /usr/bin on PATH, an unconditional shim would shadow
+# a genuine Node.js install (e.g. apt's /usr/bin/node) — so each shim is skipped
+# (and any stale shim from a prior run removed) when a real tool already exists.
+# Note: npm is NOT shimmed — bun's package manager uses its own CLI interface
 # (bun install, bun add, etc.) and does not emulate npm's command set when
-# invoked as "npm".
+# invoked as "npm"; it therefore never shadows a system npm.
 log "Setting up Node.js compatibility shims for Bun..."
 BUN_BIN="${BUN_INSTALL:-$HOME/.bun}/bin"
+
+# True if a real <tool> is resolvable on PATH *outside* Bun's own bin dir.
+# $BUN_BIN is stripped first so a shim from a previous run can't mask a genuine
+# system node/npx (keeps this block idempotent on re-runs).
+node_tool_exists_outside_bun() {
+    local tool="$1" p rest="" IFS=':'
+    for p in $PATH; do
+        [ "$p" = "$BUN_BIN" ] && continue
+        rest="${rest:+$rest:}$p"
+    done
+    PATH="$rest" command -v "$tool" &> /dev/null
+}
+
 if [ -x "$BUN_BIN/bun" ]; then
-    ln -sf "$BUN_BIN/bun" "$BUN_BIN/node"
-    # npx is a wrapper, not a symlink: bun's argv[0] sniffing only recognises
-    # "bunx"/"node", so a symlink invoked as "npx" runs `bun <arg>` and fails
-    # with `Script not found`. The wrapper calls `bun x` explicitly.
-    # Write via cat+chmod rather than `install /dev/stdin`. On the reporter's
-    # Ubuntu 26.04 (uutils/Rust coreutils, the new default) uutils `install`
-    # couldn't read the /dev/stdin heredoc source -> bare "install: No such
-    # file or directory". uutils 0.8.0 handles this in a normal env, so the
-    # trigger is env-specific (/dev/stdin not resolvable), but cat>+chmod never
-    # touches /dev/stdin and is robust on GNU and uutils alike. rm -f first so a
-    # pre-existing symlink from an older run is replaced, not followed.
-    rm -f "$BUN_BIN/npx"
-    cat > "$BUN_BIN/npx" << NPX_EOF
+    # node
+    if node_tool_exists_outside_bun node; then
+        # A real node is installed elsewhere on PATH — don't shadow it, and drop
+        # any node shim we created on an earlier run (only ours: a symlink here).
+        [ -L "$BUN_BIN/node" ] && rm -f "$BUN_BIN/node"
+        log "System 'node' already installed; leaving it in place (no Bun shim)"
+    else
+        ln -sf "$BUN_BIN/bun" "$BUN_BIN/node"
+        log "Created node -> bun shim in $BUN_BIN"
+    fi
+
+    # npx
+    if node_tool_exists_outside_bun npx; then
+        # A real npx is installed elsewhere on PATH — don't shadow it, and drop
+        # any npx wrapper we created on an earlier run (rm -f no-ops if absent).
+        rm -f "$BUN_BIN/npx"
+        log "System 'npx' already installed; leaving it in place (no Bun shim)"
+    else
+        # npx is a wrapper, not a symlink: bun's argv[0] sniffing only recognises
+        # "bunx"/"node", so a symlink invoked as "npx" runs `bun <arg>` and fails
+        # with `Script not found`. The wrapper calls `bun x` explicitly.
+        # Write via cat+chmod rather than `install /dev/stdin`. On the reporter's
+        # Ubuntu 26.04 (uutils/Rust coreutils, the new default) uutils `install`
+        # couldn't read the /dev/stdin heredoc source -> bare "install: No such
+        # file or directory". uutils 0.8.0 handles this in a normal env, so the
+        # trigger is env-specific (/dev/stdin not resolvable), but cat>+chmod never
+        # touches /dev/stdin and is robust on GNU and uutils alike. rm -f first so a
+        # pre-existing symlink from an older run is replaced, not followed.
+        rm -f "$BUN_BIN/npx"
+        cat > "$BUN_BIN/npx" << NPX_EOF
 #!/bin/sh
 exec "$BUN_BIN/bun" x "\$@"
 NPX_EOF
-    chmod 755 "$BUN_BIN/npx"
-    log "Created node symlink and npx wrapper in $BUN_BIN"
+        chmod 755 "$BUN_BIN/npx"
+        log "Created npx -> 'bun x' wrapper in $BUN_BIN"
+    fi
 else
     warn "Bun binary not found at $BUN_BIN/bun, skipping Node.js compatibility shims"
 fi
