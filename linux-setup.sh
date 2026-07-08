@@ -5,7 +5,7 @@
 
 set -eo pipefail
 
-VERSION="2.8.1"
+VERSION="2.9.0"
 FORCE_MODE=false
 NO_MODE=false
 NO_HACKING_TOOLS=false
@@ -802,6 +802,7 @@ apt_get install -y \
     lsof \
     jq \
     bat \
+    nano \
     exiftool \
     libpcap-dev \
     ufw \
@@ -1717,8 +1718,18 @@ alias upgrade-all='sudo apt-get update && sudo apt-get dist-upgrade; pipx upgrad
 alias fd='fdfind'
 alias pbcopy='xsel --clipboard --input'
 alias pbpaste='xsel --clipboard --output'
-alias bat='batcat --theme=Coldark-Cold'
-alias cat='batcat --theme=Coldark-Cold --paging=never'
+
+# bat: one theme for the aliases and MANPAGER below; guarded so cat/man keep
+# their stock behavior on machines without batcat (e.g. dotfiles copied to a VM)
+if (( $+commands[batcat] )); then
+    export BAT_THEME=Coldark-Cold
+    alias bat='batcat'
+    alias cat='batcat --paging=never'
+
+    # col -bx strips the overstrikes groff emits under MANROFFOPT="-c"
+    # (set above) so batcat gets plain text to highlight.
+    export MANPAGER="sh -c 'col -bx | batcat -l man -p'"
+fi
 
 # Trailing space lets zsh expand aliases after sudo (e.g., sudo ll -> sudo ls -l)
 alias sudo='sudo '
@@ -1740,6 +1751,10 @@ tempe() {
   fi
 }
 
+# Default editor
+export EDITOR=nano
+export VISUAL=nano
+
 # Go PATH configuration
 export PATH=$HOME/go/bin:$PATH
 
@@ -1755,10 +1770,10 @@ export PATH=$HOME/.local/bin:$PATH
 EOF
 
 # Coldark-Cold is a light theme and is illegible on a dark terminal. When the
-# terminal background is dark, drop the explicit theme so bat uses its dark
-# default. Only act on a positive dark detection (see is_dark_terminal).
+# terminal background is dark, drop BAT_THEME so bat uses its dark default.
+# Only act on a positive dark detection (see is_dark_terminal).
 if is_dark_terminal; then
-    sed -i 's/ --theme=Coldark-Cold//g' ~/.zshrc
+    sed -i '/^[[:space:]]*export BAT_THEME=/d' ~/.zshrc
     log "Dark terminal detected: removed bat's light theme (Coldark-Cold)"
 fi
 fi
