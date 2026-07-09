@@ -5,7 +5,7 @@
 
 set -eo pipefail
 
-VERSION="2.9.0"
+VERSION="2.10.0"
 FORCE_MODE=false
 NO_MODE=false
 NO_HACKING_TOOLS=false
@@ -1350,7 +1350,6 @@ bindkey '^[[Z' undo                               # shift + tab undo last action
 autoload -Uz compinit
 # Only update completion cache once a day to speed up zsh start
 zcompdump_file="${XDG_CACHE_HOME:-$HOME/.cache}/zcompdump"
-mkdir -p "${zcompdump_file%/*}"
 setopt extended_glob
 # Check if cache is fresh (less than 20 hours old)
 if [[ -n $zcompdump_file(#qNmh-20) ]]; then
@@ -1358,6 +1357,7 @@ if [[ -n $zcompdump_file(#qNmh-20) ]]; then
   compinit -C -d "$zcompdump_file"
 else
   # Cache is stale or doesn't exist - regenerate
+  mkdir -p "${zcompdump_file%/*}"
   compinit -i -d "$zcompdump_file"
   touch "$zcompdump_file"
   # Pre-parse the dump to wordcode. compinit -C's internal `source` auto-loads
@@ -1366,6 +1366,7 @@ else
   zcompile "$zcompdump_file" 2>/dev/null || true
 fi
 unsetopt extended_glob
+unset zcompdump_file
 zstyle ':completion:*:*:*:*:*' menu select
 zstyle ':completion:*' auto-description 'specify: %d'
 zstyle ':completion:*' completer _expand _complete
@@ -1625,7 +1626,7 @@ setopt complete_in_word       # cd /ho/ka/Dow<TAB> expands to /home/kali/Downloa
 # zoxide - smarter cd command (interactive shells only, to avoid interfering with automation).
 # Cache the init script so we don't spawn `zoxide init` on every startup; $commands[zoxide] is
 # zsh's fork-free path lookup, so regenerate only when the binary is newer (e.g. after upgrade).
-if command -v zoxide &> /dev/null && [[ -o interactive ]]; then
+if (( $+commands[zoxide] )) && [[ -o interactive ]]; then
     _zoxide_cache="${XDG_CACHE_HOME:-$HOME/.cache}/zoxide-init.zsh"
     if [[ ! -s "$_zoxide_cache" || $commands[zoxide] -nt "$_zoxide_cache" ]]; then
         mkdir -p "${_zoxide_cache%/*}"
@@ -1644,80 +1645,90 @@ setopt hist_reduce_blanks
 #setopt hist_ignore_all_dups   # as the name says, beware!
 
 # Better history incremental search
-multibind () {  # <cmd> <in-string> [<in-string>...]
-  emulate -L zsh
-  local cmd=$1; shift
-  for 1 { bindkey $1 $cmd }
-}
-# Keys: up; down  
+# Keys: up; down (both normal '^[[' and application-mode '^[O' sequences)
 autoload -Uz history-search-end
 zle -N history-beginning-search-backward-end history-search-end
 zle -N history-beginning-search-forward-end  history-search-end
-multibind history-beginning-search-backward-end '^[OA' '^[[A'  # up
-multibind history-beginning-search-forward-end  '^[OB' '^[[B'  # down
+bindkey '^[OA' history-beginning-search-backward-end
+bindkey '^[[A' history-beginning-search-backward-end
+bindkey '^[OB' history-beginning-search-forward-end
+bindkey '^[[B' history-beginning-search-forward-end
 zle -A {.,}history-incremental-search-forward
 zle -A {.,}history-incremental-search-backward
 
-# Remove trailing newlines if any from pasted text
+# Remove trailing newlines if any from pasted text (fork-free, and unlike
+# echo it can't misparse a paste that happens to look like echo flags)
 bracketed-paste() {
-  zle .$WIDGET && LBUFFER=$(echo -En "$LBUFFER")
+  emulate -L zsh -o extendedglob
+  zle .$WIDGET && LBUFFER=${LBUFFER%%$'\n'#}
 }
 zle -N bracketed-paste
 
-# HSTR configuration
-alias h=hstr                     # h to be alias for hstr
-setopt histignorespace           # skip cmds w/ leading space from history
-export HSTR_CONFIG=hicolor,raw-history-view      # get more colors
-hstr_no_tiocsti() {
-    #zle -I
-    {
-    MERGE="hstr ${BUFFER};"
-    HSTR_OUT=$({ </dev/tty eval " $MERGE" } 2>&1 1>&3 3>&- );
-    } 3>&1;
-    BUFFER="${HSTR_OUT}"
-    CURSOR=${#BUFFER}
-    zle reset-prompt
-}
-zle -N hstr_no_tiocsti
-bindkey '\C-r' hstr_no_tiocsti
-export HSTR_TIOCSTI=n
+# HSTR configuration (guarded so ^R keeps stock incremental search on machines
+# without hstr; the hist_ignore_space it wants is already set in the baseline)
+if (( $+commands[hstr] )); then
+    alias h=hstr                     # h to be alias for hstr
+    export HSTR_CONFIG=hicolor,raw-history-view      # get more colors
+    hstr_no_tiocsti() {
+        local MERGE HSTR_OUT
+        {
+        MERGE="hstr ${BUFFER};"
+        HSTR_OUT=$({ </dev/tty eval " $MERGE" } 2>&1 1>&3 3>&- );
+        } 3>&1;
+        BUFFER="${HSTR_OUT}"
+        CURSOR=${#BUFFER}
+        zle reset-prompt
+    }
+    zle -N hstr_no_tiocsti
+    bindkey '\C-r' hstr_no_tiocsti
+    export HSTR_TIOCSTI=n
+fi
 
 # https://github.com/akavel/up/ https://github.com/akavel/up/issues/44
-UPCOMMAND="bwrap --die-with-parent --ro-bind / / --bind /tmp /tmp --dev /dev --proc /proc --tmpfs /var --tmpfs /run --dir /run/user/$UID --unshare-pid --unshare-cgroup --unshare-ipc --unshare-net --cap-drop ALL /usr/local/bin/up"
-zle-upify() {
-    local args=""
+# Guarded (like batcat below) so a copied .zshrc degrades gracefully when the
+# bwrap sandbox or the frozen /usr/local/bin/up build is absent: ^P then keeps
+# its stock zle binding instead of running a broken widget.
+if (( $+commands[bwrap] )) && [[ -x /usr/local/bin/up ]]; then
+    UPCOMMAND="bwrap --die-with-parent --ro-bind / / --bind /tmp /tmp --dev /dev --proc /proc --tmpfs /var --tmpfs /run --dir /run/user/$UID --unshare-pid --unshare-cgroup --unshare-ipc --unshare-net --cap-drop ALL /usr/local/bin/up"
+    zle-upify() {
+        local args="" buf tmp cmd
 
-    if [[ -n "$ZSH_UP_UNSAFE_FULL_THROTTLE" ]]; then
-        args="$args --unsafe-full-throttle"
-    fi
+        if [[ -n "$ZSH_UP_UNSAFE_FULL_THROTTLE" ]]; then
+            args="--unsafe-full-throttle"
+        fi
 
-    # Trim the whitespace and the last pipe character
-    buf="$(echo -n "$BUFFER" | sed 's/[ |]*$//')"
+        # Trim the whitespace and the last pipe character
+        buf="$(echo -n "$BUFFER" | sed 's/[ |]*$//')"
 
-    # Run up and save the output to a temporary file
-    tmp="$(mktemp)"
-    eval "$buf |& $UPCOMMAND $args -o '$tmp' 2>/dev/null"
+        # Run up and save the output to a temporary file
+        tmp="$(mktemp)"
+        eval "$buf |& $UPCOMMAND $args -o '$tmp' 2>/dev/null"
 
-    # Remove the first shebang line, and trailing newlines
-    cmd="$(tail -n +2 "$tmp" | tr -d "\n")"
-    rm -f "$tmp"
-    
-    # Set the current line if necessary
-    if [[ -n "$cmd" ]]; then
-        BUFFER="$buf | $cmd"
-        zle end-of-line
-    fi
-}
-zle -N zle-upify
-bindkey "${ZSH_UP_KEYBINDING:-^P}" zle-upify
+        # Remove the first shebang line, and trailing newlines
+        cmd="$(tail -n +2 "$tmp" | tr -d "\n")"
+        rm -f "$tmp"
 
-alias up="$UPCOMMAND"
-alias polster='bwrap --die-with-parent --tmpfs /tmp --ro-bind /usr /usr --ro-bind /bin /bin --ro-bind /lib /lib --ro-bind /lib64 /lib64 --ro-bind /sbin /sbin --ro-bind /etc /etc --dev /dev --proc /proc --tmpfs /var --tmpfs /run --dir /run/user/$UID --tmpfs /usr/share --unshare-all --clearenv'
+        # Set the current line if necessary
+        if [[ -n "$cmd" ]]; then
+            BUFFER="$buf | $cmd"
+            zle end-of-line
+        fi
+    }
+    zle -N zle-upify
+    bindkey "${ZSH_UP_KEYBINDING:-^P}" zle-upify
+
+    alias up="$UPCOMMAND"
+fi
+(( $+commands[bwrap] )) && alias polster='bwrap --die-with-parent --tmpfs /tmp --ro-bind /usr /usr --ro-bind /bin /bin --ro-bind /lib /lib --ro-bind /lib64 /lib64 --ro-bind /sbin /sbin --ro-bind /etc /etc --dev /dev --proc /proc --tmpfs /var --tmpfs /run --dir /run/user/$UID --tmpfs /usr/share --unshare-all --clearenv'
 
 alias upgrade-all='sudo apt-get update && sudo apt-get dist-upgrade; pipx upgrade-all'
-alias fd='fdfind'
-alias pbcopy='xsel --clipboard --input'
-alias pbpaste='xsel --clipboard --output'
+# Debian installs fd as 'fdfind'; guarded so the alias can't shadow a real fd
+# binary (and pbcopy/pbpaste stay absent, not broken) on machines without them
+(( $+commands[fdfind] )) && alias fd='fdfind'
+if (( $+commands[xsel] )); then
+    alias pbcopy='xsel --clipboard --input'
+    alias pbpaste='xsel --clipboard --output'
+fi
 
 # bat: one theme for the aliases and MANPAGER below; guarded so cat/man keep
 # their stock behavior on machines without batcat (e.g. dotfiles copied to a VM)
@@ -1733,7 +1744,7 @@ fi
 
 # Trailing space lets zsh expand aliases after sudo (e.g., sudo ll -> sudo ls -l)
 alias sudo='sudo '
-alias sudp='sudo '
+alias sudp='sudo '  # deliberate typo guard
 
 # Directory creation helpers
 mkcd() {
@@ -1742,11 +1753,11 @@ mkcd() {
 }
 
 tempe() {
-  local tmpdir="$(mktemp -d)"
-  \cd "$tmpdir" && chmod -R 0700 "$tmpdir"
+  local tmpdir="$(mktemp -d)"  # mktemp -d already creates the dir mode 0700
+  \cd "$tmpdir"
   if [[ $# -eq 1 ]]; then
-    \mkdir -p "$1"
-    \cd "$1"
+    \mkdir -p -- "$1"
+    \cd -- "$1"
     chmod -R 0700 .
   fi
 }
