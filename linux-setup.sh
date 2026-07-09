@@ -5,7 +5,7 @@
 
 set -eo pipefail
 
-VERSION="2.10.1"
+VERSION="2.11.0"
 FORCE_MODE=false
 NO_MODE=false
 NO_HACKING_TOOLS=false
@@ -558,6 +558,10 @@ apt_candidate_version_num() {
 # True if the apt candidate for $1 has a version number >= $2
 apt_meets_min() { [ "$(apt_candidate_version_num "$1")" -ge "$2" ]; }
 
+# True if $1 exists in the apt archive at all (any version). For tools we only
+# want from the distro repos, with no source-build fallback.
+apt_available() { [ "$(apt_candidate_version_num "$1")" -gt 0 ]; }
+
 # Remove stale source-built copies of a binary so the apt copy wins on PATH.
 # REQUIRED because .zshrc puts ~/.cargo/bin and ~/go/bin BEFORE /usr/bin and
 # /usr/local/bin, so a leftover cargo/go binary would otherwise shadow the
@@ -600,6 +604,19 @@ install_apt_package() {
         apt_get install -y "$apt_pkg"
     else
         log "${display} already installed from apt (${apt_pkg})"
+    fi
+}
+
+# Install a tool ONLY from the distro repos, with no source-build fallback; skip
+# quietly on releases that don't package it. For tools we deliberately never
+# compile (procs, dust). Usage: install_apt_only <display-name> <apt-package>
+install_apt_only() {
+    local display="$1"
+    local apt_pkg="$2"
+    if apt_available "$apt_pkg"; then
+        install_apt_package "$display" "$apt_pkg"
+    else
+        log "${display} not in apt repositories on this release (${apt_pkg}) - skipping"
     fi
 }
 
@@ -1246,6 +1263,11 @@ if command -v delta &> /dev/null; then
     git config --global merge.conflictstyle "zdiff3"
 fi
 
+# procs (modern ps) and dust (modern du, binary 'dust' from the du-dust package):
+# repo-only, no cargo fallback - install_apt_only skips releases that lack them.
+install_apt_only "procs" "procs"
+install_apt_only "dust"  "du-dust"
+
 # Disable screensaver and power management
 if has_desktop_environment; then
     log "Disabling screensaver and power save options..."
@@ -1634,6 +1656,38 @@ if (( $+commands[zoxide] )) && [[ -o interactive ]]; then
     fi
     source "$_zoxide_cache"
     unset _zoxide_cache
+fi
+
+# fzf - fuzzy finder key bindings + completion (interactive shells only).
+# Ctrl-T inserts file paths, Alt-C cds into a subdir, **<Tab> triggers fuzzy
+# completion. Ctrl-R is left to the hstr block below (it runs after this one and
+# rebinds Ctrl-R when hstr is present); without hstr, fzf's own Ctrl-R stays.
+# Init output is cached like zoxide's so we don't fork fzf on every startup;
+# $commands[fzf] is the fork-free path lookup, so regenerate only after upgrade.
+if (( $+commands[fzf] )) && [[ -o interactive ]]; then
+    if (( $+commands[fdfind] )); then
+        export FZF_DEFAULT_COMMAND='fdfind --type f --hidden --strip-cwd-prefix --exclude .git'
+        export FZF_ALT_C_COMMAND='fdfind --type d --hidden --strip-cwd-prefix --exclude .git'
+    fi
+    export FZF_DEFAULT_OPTS='--height 40% --layout=reverse --border'
+    (( $+commands[batcat] )) && export FZF_CTRL_T_OPTS='--preview "batcat --color=always --line-range :200 {}"'
+    export FZF_ALT_C_OPTS='--preview "tree -C {} 2>/dev/null | head -200"'
+
+    _fzf_cache="${XDG_CACHE_HOME:-$HOME/.cache}/fzf-init.zsh"
+    if [[ ! -s "$_fzf_cache" || $commands[fzf] -nt "$_fzf_cache" ]]; then
+        mkdir -p "${_fzf_cache%/*}"
+        # fzf >= 0.48 embeds the scripts (fzf --zsh); older Debian/Kali packages
+        # ship them under /usr/share/doc instead. The '>' truncates the cache to
+        # empty first, so a total failure degrades to no key bindings, not an error.
+        fzf --zsh > "$_fzf_cache" 2>/dev/null \
+            || cp /usr/share/doc/fzf/examples/key-bindings.zsh "$_fzf_cache" 2>/dev/null
+    fi
+    source "$_fzf_cache"
+    unset _fzf_cache
+    # Terminator grabs Ctrl-T for new-tab, so also bind the fzf file widget to
+    # Alt-T (works inside Terminator and out). Guarded on the widget existing, in
+    # case an old fzf shipped no --zsh integration and the cache is empty.
+    (( ${+widgets[fzf-file-widget]} )) && bindkey '^[t' fzf-file-widget
 fi
 
 # Enhanced history settings

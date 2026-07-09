@@ -28,6 +28,8 @@
   - [unp - Universal Unpacker](#unp---universal-unpacker)
   - [httpie - User-Friendly HTTP Client](#httpie---user-friendly-http-client)
   - [ncdu - Disk Usage Analyzer](#ncdu---disk-usage-analyzer)
+  - [dust - Intuitive Disk Usage](#dust---intuitive-disk-usage)
+  - [procs - Modern Process Viewer](#procs---modern-process-viewer)
   - [uv - Fast Python Package Manager](#uv---fast-python-package-manager)
   - [fzf - Fuzzy Finder](#fzf---fuzzy-finder)
   - [zoxide - Smart Directory Navigation](#zoxide---smart-directory-navigation)
@@ -562,6 +564,36 @@ ncdu -o diskusage.json
 #   q: Quit
 ```
 
+### [dust](https://github.com/bootandy/dust) - Intuitive Disk Usage
+
+`dust` is a `du` that sizes itself to your terminal and puts the biggest things first, so you skip the usual `du | sort | head`. Use it for a quick glance; reach for `ncdu` when you want to browse and delete interactively.
+
+```bash
+dust            # biggest items under the current directory
+dust /var       # a specific directory
+dust -n 30      # show 30 entries
+dust -d 3       # limit depth to 3 levels
+dust -D         # directories only
+dust -f         # count files instead of measuring size
+```
+
+Installed from the distro repositories where available (the `du-dust` package).
+
+### [procs](https://github.com/dalance/procs) - Modern Process Viewer
+
+`procs` replaces `ps` with colored columns and keyword filtering, and it shows things `ps` won't, like the owning Docker container and open TCP/UDP ports.
+
+```bash
+procs               # all processes
+procs firefox       # filter by a name, PID, or user keyword
+procs --tree        # process hierarchy
+procs --watch       # live, top-style refresh
+procs --sortd cpu   # sort by CPU, descending
+sudo procs --insert TcpPort   # add a ports column (root needed for other users' processes)
+```
+
+Like `bat`, it reads your terminal background and picks colors to match. Installed from the distro repositories where available.
+
 ### [uv](https://github.com/astral-sh/uv) - Fast Python Package Manager
 
 `uv` is a Python package installer and resolver written in Rust. Astral, its maker, benchmarks it at 10-100x faster than pip:
@@ -620,6 +652,14 @@ kill -9 $(ps aux | fzf | awk '{print $2}')
 # Multi-select files (Tab to select, Enter to confirm)
 rm $(fzf --multi)
 ```
+
+The script wires fzf's shell integration into zsh, so these work at the prompt:
+
+- `Ctrl+T` (or `Alt+T`) - fuzzy-pick files or directories and drop the paths onto the command line (bat preview)
+- `Alt+C` - fuzzy-pick a subdirectory and cd into it (tree preview)
+- `**<Tab>` - fuzzy completion trigger, for example `vim **<Tab>`, `kill **<Tab>`, or `ssh **<Tab>`
+
+Terminator uses `Ctrl+T` for new tabs and grabs it before the shell sees it, so the file widget is also bound to `Alt+T`; use that one inside Terminator. `Ctrl+R` stays with hstr (see above); fzf does not take it over. When fd is present, the file and directory lists come from it, so they respect `.gitignore` and include hidden files.
 
 > **Note**: The `cd` command is replaced by `zoxide` for smart frecency-based directory navigation.
 
@@ -928,6 +968,8 @@ Every tool the script installs, with links to its homepage and docs.
 | **sd** | [GitHub](https://github.com/chmln/sd) | [README](https://github.com/chmln/sd#quick-examples) |
 | **bat** | [GitHub](https://github.com/sharkdp/bat) | [README](https://github.com/sharkdp/bat#usage) |
 | **fzf** | [GitHub](https://github.com/junegunn/fzf) | [README](https://github.com/junegunn/fzf#usage) |
+| **procs** (where packaged) | [GitHub](https://github.com/dalance/procs) | [README](https://github.com/dalance/procs#usage) |
+| **dust** (where packaged) | [GitHub](https://github.com/bootandy/dust) | [README](https://github.com/bootandy/dust#usage) |
 | **jq** | [jqlang.github.io](https://jqlang.github.io/jq/) | [Manual](https://jqlang.github.io/jq/manual/) |
 | **moreutils** | [joeyh.name](https://joeyh.name/code/moreutils/) | [man pages](https://manpages.debian.org/trixie/moreutils/) |
 | **httpie** | [httpie.io](https://httpie.io/) | [Documentation](https://httpie.io/docs/cli) |
