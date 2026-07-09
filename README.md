@@ -105,7 +105,9 @@ The script supports the following command-line options:
 **Interactive Mode (default):**
 By default, the script will prompt you for confirmation on certain actions:
 - Overwriting existing `.zshrc` configuration (default: Yes)
+- Migrating existing bash history to zsh (default: Yes; only when switching from bash)
 - Changing default shell to zsh (default: Yes)
+- Overwriting existing PowerShell profile (default: No)
 - Overwriting existing Terminator configuration (default: No)
 - Overwriting existing tmux configuration (default: No)
 - Configuring German keyboard layout in XFCE (default: No; skip entirely with `--no-keyboard-layout`)
@@ -170,7 +172,7 @@ Examples of the installed tools in action.
 
 The script sets Terminator as the default terminal, with custom keybindings and a few tweaked defaults.
 
-> **Want an AI agent built into your terminal?** This setup ships Terminator. If you'd rather have an LLM agent living in the terminal itself, take a look at [zap-setup](https://github.com/c0ffee0wl/zap-setup), a companion installer for the [Zap](https://github.com/zerx-lab/zap) terminal. It installs Zap, gives it Terminator-style keybindings and a matching light theme, and pre-wires the agent so you can point it at whatever LLM provider you like. A local LiteLLM proxy is set up out of the box, but any provider Zap supports works just as well. The AI side is optional too, so Zap still works as a plain terminal if you never add a key. It's a separate program, not part of this script.
+> **Want an AI agent built into your terminal?** This setup ships Terminator. If you'd rather have an LLM agent living in the terminal itself, take a look at [zap-setup](https://github.com/c0ffee0wl/zap-setup), a companion installer for the [Zap](https://github.com/zerx-lab/zap) terminal. It installs Zap, gives it Terminator-style keybindings and a matching light theme, and pre-wires the AI agent so you can point it at whatever LLM provider Zap supports. Out of the box it's aimed at the public OpenAI API. If you're already running a local [LiteLLM](https://docs.litellm.ai/) proxy, setup notices and points the agent there instead. It won't install LiteLLM for you, though; the sibling [claude-litellm](https://github.com/c0ffee0wl/claude-litellm) installer does that. The AI side is optional too, so Zap still works as a plain terminal if you never add a key. It's a separate program, not part of this script.
 
 #### Terminator Keyboard Shortcuts
 
@@ -383,7 +385,7 @@ bat large-log.txt
 batcat --paging=never file.py
 ```
 
-> **Note**: The script aliases `cat` to `batcat --theme=Coldark-Cold --paging=never` for everyday use.
+> **Note**: The script aliases `cat` to `batcat --paging=never` and sets `BAT_THEME=Coldark-Cold`, a light theme. If your terminal is dark, it drops that theme so bat uses its own dark default instead.
 
 ### [jq](https://jqlang.github.io/jq/) - JSON Processor
 
@@ -838,6 +840,7 @@ The script creates/modifies these configuration files:
 **Shell & Terminal:**
 - `~/.zshrc` - Enhanced Zsh configuration with custom aliases and integrations
 - `~/.tmux.conf` - tmux terminal multiplexer settings
+- `~/.config/powershell/profile.ps1` - PowerShell profile (cross-version QoL; ISE-style light theme applied only on light terminals)
 - `~/.config/terminator/config` - Terminator terminal settings
 - `~/.config/terminator/plugins/tab_numbers.py` - Tab numbers plugin for Terminator
 - `~/.config/gtk-3.0/gtk.css` - GTK terminal padding configuration (8px)
@@ -864,6 +867,7 @@ The script creates/modifies these configuration files:
 - `/etc/systemd/resolved.conf.d/disable-stub.conf` - DNS stub listener configuration
 - `/etc/apt/sources.list.d/docker.list` - Docker CE repository
 - `/etc/apt/sources.list.d/vscode.sources` - Visual Studio Code repository
+- `/etc/apt/sources.list.d/microsoft-prod.sources` - Microsoft PowerShell repository (only when PowerShell is installed from Microsoft's repo, i.e. non-Kali)
 
 **Runtime Environments (Conditional):**
 - `~/.cargo/env` - Rust/Cargo environment (if installed via rustup)
@@ -872,10 +876,10 @@ The script creates/modifies these configuration files:
 
 ## Security Considerations
 
-- **No root execution**: Script refuses to run as root for security
-- **User verification**: Prompts before making system changes
+- **Root warning**: Warns (but does not block) if run as root, and recommends running as a regular user with sudo privileges
+- **Config confirmation**: Prompts before overwriting existing dotfiles and changing the default shell (package installs run automatically)
 - **Sandboxed tools**: Includes bubblewrap for command isolation
-- **Docker security**: User added to docker group (requires logout)
+- **Docker security**: On Kali, the user is added to the docker group (requires logout); on other distributions this is left opt-in, because docker group membership is root-equivalent
 - **Supply-chain hardening** (all configs consolidated in `apply_supply_chain_hardening()`, runnable standalone via `--harden-only`):
   - npm: `ignore-scripts=true`, `save-exact=true`, 7-day `min-release-age` quarantine
   - Bun: exact version pinning, 7-day `minimumReleaseAge`, text lockfiles
