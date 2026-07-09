@@ -5,7 +5,7 @@
 
 set -eo pipefail
 
-VERSION="2.10.0"
+VERSION="2.10.1"
 FORCE_MODE=false
 NO_MODE=false
 NO_HACKING_TOOLS=false
@@ -2099,7 +2099,7 @@ set -g status-keys emacs     # command-prompt editing
 # --- General behaviour ---
 set -g mouse on              # click panes, drag borders, wheel-scroll
 set -g history-limit 50000   # large scrollback for long command output
-set -s escape-time 0         # no lag after pressing Esc
+set -s escape-time 10        # near-instant Esc without misreading split escape sequences (e.g. over SSH)
 set -g focus-events on       # let apps (e.g. editors) see focus in/out
 set -g display-time 4000     # status messages stay readable (4s)
 set -g status-interval 5     # refresh the status line every 5s
