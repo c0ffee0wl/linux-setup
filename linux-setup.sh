@@ -5,7 +5,7 @@
 
 set -eo pipefail
 
-VERSION="2.11.0"
+VERSION="2.11.1"
 FORCE_MODE=false
 NO_MODE=false
 NO_HACKING_TOOLS=false
@@ -1776,6 +1776,15 @@ fi
 (( $+commands[bwrap] )) && alias polster='bwrap --die-with-parent --tmpfs /tmp --ro-bind /usr /usr --ro-bind /bin /bin --ro-bind /lib /lib --ro-bind /lib64 /lib64 --ro-bind /sbin /sbin --ro-bind /etc /etc --dev /dev --proc /proc --tmpfs /var --tmpfs /run --dir /run/user/$UID --tmpfs /usr/share --unshare-all --clearenv'
 
 alias upgrade-all='sudo apt-get update && sudo apt-get dist-upgrade; pipx upgrade-all'
+
+# Git shortcuts. git is a hard dependency of this setup (self-update + delta
+# config assume it), so these stay unguarded like upgrade-all/ll. 'g' is the
+# standard git prefix (g status, g push, ...); 'gl' is the ADOG log
+# (all/decorate/oneline/graph). No --color flag: git auto-colors to a TTY and
+# stays plain when piped, so `gl | grep foo` won't get ANSI escapes injected.
+alias g='git'
+alias gl='git log --all --decorate --oneline --graph'
+
 # Debian installs fd as 'fdfind'; guarded so the alias can't shadow a real fd
 # binary (and pbcopy/pbpaste stay absent, not broken) on machines without them
 (( $+commands[fdfind] )) && alias fd='fdfind'
