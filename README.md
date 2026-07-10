@@ -179,7 +179,7 @@ sudo upgrade-to-kali --yes    # non-interactive (skip the confirmation)
 
 What it does:
 
-1. Runs a disk-space preflight. On systemd-boot systems (e.g. DigitalOcean droplets) the kernel **and full initrd** are copied onto the EFI System Partition, and Kali initrds (~200 MB) are far larger than Debian's — a too-small ESP would break the upgrade midway. The preflight offers to remove stale/truncated boot files from the ESP and, on VMs, to write a `MODULES=dep` initramfs config that shrinks the initrds enough to fit; otherwise it aborts with manual guidance before anything is changed (`--skip-preflight` to override)
+1. Runs a disk-space preflight. On systemd-boot systems (e.g. DigitalOcean droplets) the kernel **and full initrd** are copied onto the EFI System Partition, and Kali initrds (~200 MB) are far larger than Debian's — a too-small ESP would break the upgrade midway. The preflight offers to remove stale/truncated boot files from the ESP, to purge surplus old kernels (never the running or the newest one — each frees a whole kernel+initrd pair), and, on VMs, to write a `MODULES=dep` initramfs config that shrinks the initrds enough to fit; otherwise it aborts with manual guidance before anything is changed (`--skip-preflight` to override)
 2. Adds the Kali `kali-rolling` repository and archive keyring
 3. **Disables** the existing Debian repositories, since Kali doesn't support mixing Debian and Kali repos (backups go to `/etc/apt/upgrade-to-kali-backup/`)
 4. Runs a full `apt full-upgrade` against `kali-rolling`, which rebases the base system onto Kali

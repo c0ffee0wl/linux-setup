@@ -12,7 +12,7 @@ set -eo pipefail
 export LC_ALL=C.UTF-8
 export LANG=C.UTF-8
 
-VERSION="2.15.0"
+VERSION="2.16.0"
 FORCE_MODE=false
 NO_MODE=false
 NO_HACKING_TOOLS=false
@@ -2310,7 +2310,7 @@ set -eo pipefail
 export LC_ALL=C.UTF-8
 export LANG=C.UTF-8
 
-VERSION="1.1.0"
+VERSION="1.2.0"
 
 # Overridable paths/thresholds: production defaults; overridden by tests, or by
 # an operator to steer detection (e.g. ESP_PATH when auto-detection misfires).
@@ -2330,6 +2330,7 @@ STATE_FILE="${STATE_FILE:-/var/lib/upgrade-to-kali/state}"
 ROOT_MIN_FREE_KIB="${ROOT_MIN_FREE_KIB:-6291456}"    # 6 GiB, warn-only
 ESP_FLOOR_MOST_KIB="${ESP_FLOOR_MOST_KIB:-307200}"   # 300 MiB (Debian trixie guidance)
 ESP_FLOOR_DEP_KIB="${ESP_FLOOR_DEP_KIB:-65536}"      # 64 MiB
+ESP_HEADROOM_PCT="${ESP_HEADROOM_PCT:-25}"           # margin on a measured kernel pair
 # Empty means auto-select at conversion time: kali-linux-default when a desktop
 # is present, else kali-linux-headless. Set the env var to force a choice.
 KALI_METAPACKAGE="${KALI_METAPACKAGE:-}"
@@ -2368,9 +2369,10 @@ The base-system rebase is effectively irreversible - snapshot/back up first.
 Before converting, a preflight checks free disk space. On systemd-boot
 systems the kernel and full initrd are copied onto the EFI System Partition,
 and Kali initrds are much larger than Debian's - a too-small ESP aborts the
-run. On virtual machines the tool offers to write a persistent MODULES=dep
-initramfs config (revert instructions inside the written file) so the
-initrds shrink enough to fit.
+run. To make room the tool offers to remove stale boot files and surplus old
+kernels (never the running or the newest one), and on virtual machines to
+write a persistent MODULES=dep initramfs config (revert instructions inside
+the written file) so the initrds shrink enough to fit.
 
 If a conversion is interrupted, a marker is left at ${STATE_FILE} and
 re-running 'sudo upgrade-to-kali' repairs dpkg and resumes the conversion.
@@ -2396,6 +2398,12 @@ osr() {
     l=$(grep -E "^$1=" "$OS_RELEASE_FILE" 2>/dev/null | head -1) || return 1
     l="${l#*=}"; l="${l%\"}"; l="${l#\"}"
     printf '%s' "$l"
+}
+
+# Read key $2 from key=value file $1 (empty when absent/unreadable).
+kv_get() {
+    [ -r "$1" ] || return 0
+    grep -E "^$2=" "$1" 2>/dev/null | head -1 | cut -d= -f2- || true
 }
 
 check_already_kali() {
@@ -2522,10 +2530,15 @@ find_esp() {
 }
 
 # True when kernel-install copies kernels+initrds onto the ESP ($1).
+# Version dirs hold `linux`/`initrd` (upstream kernel-install naming) or
+# `vmlinuz-<ver>`/`initrd.img-<ver>` (Debian's systemd-boot hook naming).
 kernels_on_esp() {
     local esp="$1" token
     token=$(entry_token)
-    if [ -n "$token" ] && compgen -G "$esp/$token/*/linux" > /dev/null; then return 0; fi
+    if [ -n "$token" ]; then
+        if compgen -G "$esp/$token/*/linux" > /dev/null || \
+           compgen -G "$esp/$token/*/vmlinuz-*" > /dev/null; then return 0; fi
+    fi
     if compgen -G "$esp/loader/entries/*.conf" > /dev/null; then return 0; fi
     # Debian's systemd-boot package hooks: the exact mechanism that copies
     # kernels/initrds during dpkg configure, even while the ESP is still empty.
@@ -2549,20 +2562,49 @@ max_file_kib() {
     printf '%s' "$m"
 }
 
+# All kernel versions present in /boot, one per line.
+boot_kernel_versions() {
+    local f
+    for f in "$BOOT_DIR"/vmlinuz-*; do
+        [ -f "$f" ] || continue
+        printf '%s\n' "${f##*/vmlinuz-}"
+    done
+}
+
+newest_boot_kernel() {
+    local newest="" v
+    while IFS= read -r v; do
+        if [ -z "$newest" ] || dpkg --compare-versions "$v" gt "$newest"; then newest="$v"; fi
+    done < <(boot_kernel_versions)
+    printf '%s' "$newest"
+}
+
 # Estimated KiB the incoming Kali kernel+initrd needs on the ESP.
 # $1 = most|dep (the initramfs MODULES policy the estimate is for).
-# 2x the largest local kernel+initrd pair, with a floor: a Debian cloud
-# kernel's ~30 MB initrd predicts nothing about Kali's ~200 MB one, so the
-# floor (the Debian trixie release notes' "at least 300 MB free" guidance
-# for systemd-boot layouts) carries the MODULES=most check.
+# Once the conversion has installed its kernel - any /boot version newer than
+# the baseline recorded in the state marker; vendor naming is deliberately not
+# used, Kali kernel ABIs have not always contained "kali" - measure that pair
+# plus ESP_HEADROOM_PCT: its ESP copies overwrite in place, so free space only
+# has to absorb roughly one extra pair (a newer version arriving mid-upgrade).
+# Before that there is nothing to measure, so guess: 2x the largest Debian
+# pair with a floor, because a Debian cloud kernel's ~30 MB initrd predicts
+# nothing about Kali's ~200 MB one (the MODULES=most floor is the Debian
+# trixie release notes' "at least 300 MB free" guidance).
 esp_required_kib() {
-    local floor need
-    case "$1" in
-        dep) floor="$ESP_FLOOR_DEP_KIB" ;;
-        *)   floor="$ESP_FLOOR_MOST_KIB" ;;
-    esac
-    need=$(( ( $(max_file_kib "$BOOT_DIR"/vmlinuz-*) + $(max_file_kib "$BOOT_DIR"/initrd.img-*) ) * 2 ))
-    if [ "$need" -lt "$floor" ]; then need=$floor; fi
+    local baseline newest pair need floor
+    baseline=$(kv_get "$STATE_FILE" baseline_kernel)
+    newest=$(newest_boot_kernel)
+    if [ -n "$baseline" ] && [ -n "$newest" ] && dpkg --compare-versions "$newest" gt "$baseline"; then
+        pair=$(( $(max_file_kib "$BOOT_DIR/vmlinuz-$newest") + $(max_file_kib "$BOOT_DIR/initrd.img-$newest"*) ))
+        need=$(( pair * (100 + ESP_HEADROOM_PCT) / 100 ))
+    else
+        case "$1" in
+            dep) floor="$ESP_FLOOR_DEP_KIB" ;;
+            *)   floor="$ESP_FLOOR_MOST_KIB" ;;
+        esac
+        need=$(( ( $(max_file_kib "$BOOT_DIR"/vmlinuz-*) + $(max_file_kib "$BOOT_DIR"/initrd.img-*) ) * 2 ))
+        if [ "$need" -lt "$floor" ]; then need=$floor; fi
+    fi
     printf '%s' "$need"
 }
 
@@ -2603,7 +2645,10 @@ clean_stale_esp_copies() {
         for f in "$verdir"initrd*; do
             if size_mismatch "$f" "$BOOT_DIR/initrd.img-$ver"; then stale+=("$f"); fi
         done
-        if size_mismatch "${verdir}linux" "$BOOT_DIR/vmlinuz-$ver"; then stale+=("${verdir}linux"); fi
+        # Kernel copy: `linux` (upstream naming) or `vmlinuz-<ver>` (Debian hook).
+        for f in "$verdir"linux "$verdir"vmlinuz-*; do
+            if size_mismatch "$f" "$BOOT_DIR/vmlinuz-$ver"; then stale+=("$f"); fi
+        done
     done
     [ "${#stale[@]}" -gt 0 ] || return 0
     warn "Stale/incomplete boot files on the ESP (safe to remove; re-copied from $BOOT_DIR):"
@@ -2611,12 +2656,62 @@ clean_stale_esp_copies() {
     ask_yn "Remove them to free ESP space?" || return 0
     local it
     for it in "${stale[@]}"; do
-        rm -rf "$it"
         case "$it" in
-            */) rm -f "$esp"/loader/entries/*"$(basename "$it")"*.conf ;;
+            */) remove_esp_version "$esp" "$(basename "$it")" ;;
+            *)  rm -f "$it" ;;
         esac
     done
     ok "Removed ${#stale[@]} stale ESP item(s)"
+}
+
+# Kernel versions that are safe to drop: installed in /boot but neither the
+# running kernel nor the newest one (bootctl's own eviction rule: never the
+# booted entry, never the last remaining).
+surplus_kernel_versions() {
+    local running newest v
+    running=$(uname -r)
+    newest=$(newest_boot_kernel)
+    while IFS= read -r v; do
+        if [ "$v" != "$running" ] && [ "$v" != "$newest" ]; then printf '%s\n' "$v"; fi
+    done < <(boot_kernel_versions)
+}
+
+# Remove a kernel version's ($2) boot files from the ESP ($1): its
+# kernel-install version dir and any loader entries referencing it.
+remove_esp_version() {
+    local esp="$1" ver="$2" token
+    token=$(entry_token)
+    if [ -n "$token" ]; then rm -rf "${esp:?}/$token/$ver"; fi
+    rm -f "$esp"/loader/entries/*"$ver"*.conf
+}
+
+# Free a whole kernel+initrd pair per surplus kernel (prompted). With a
+# healthy dpkg one batched apt purge does it cleanly (the kernel hooks remove
+# the ESP copies and loader entries); mid-resume dpkg is broken and apt would
+# refuse, so use the standalone canonical primitives instead:
+# update-initramfs -d deregisters the version and deletes its initrd (so the
+# initramfs triggers cannot re-copy it), kernel-install remove drops the ESP
+# version dir and loader entry - and apt's autoremove finishes the package
+# purge after the repair. Returns 0 only when kernels were actually removed,
+# so callers can skip the re-measure otherwise.
+remove_surplus_kernels() {
+    local esp="$1" v
+    local candidates=()
+    mapfile -t candidates < <(surplus_kernel_versions)
+    [ "${#candidates[@]}" -gt 0 ] || return 1
+    warn "Kernels that are neither running nor newest are taking ESP space: ${candidates[*]}"
+    ask_yn "Remove them to free ESP space (the running and the newest kernel are kept)?" || return 1
+    if [ -z "$(dpkg --audit 2>/dev/null)" ]; then
+        apt_ni purge -y "${candidates[@]/#/linux-image-}"
+    else
+        for v in "${candidates[@]}"; do
+            update-initramfs -d -k "$v" 2>/dev/null || true
+            if ! BOOT_ROOT="$esp" kernel-install remove "$v" 2>/dev/null; then
+                remove_esp_version "$esp" "$v"
+            fi
+        done
+    fi
+    ok "Removed ${#candidates[@]} surplus kernel(s)"
 }
 
 # Write a persistent MODULES=dep initramfs policy and regenerate all initrds
@@ -2667,6 +2762,10 @@ preflight() {
         ok "ESP has enough free space."
         return 0
     fi
+    if remove_surplus_kernels "$esp" && esp_fits "$esp" most; then
+        ok "ESP has enough free space."
+        return 0
+    fi
     if is_vm; then
         warn "The ESP is too small for Kali's default (MODULES=most) initrd."
         if ask_yn "Write MODULES=dep to $MODULES_CONF and regenerate initrds now (VM-safe, persistent)?"; then
@@ -2712,6 +2811,9 @@ mark_conversion_started() {
         printf 'version=%s\n' "$VERSION"
         printf 'started=%s\n' "$(date -Is)"
         printf 'metapackage=%s\n' "$KALI_METAPACKAGE"
+        # Any /boot kernel newer than this was installed by the conversion -
+        # esp_required_kib measures it instead of guessing.
+        printf 'baseline_kernel=%s\n' "$(newest_boot_kernel)"
     } > "$STATE_FILE"
     trap on_exit EXIT
 }
@@ -2720,6 +2822,19 @@ finish_conversion() {
     rm -f "$STATE_FILE"
     rmdir "$(dirname "$STATE_FILE")" 2>/dev/null || true
     trap - EXIT
+}
+
+# True when no conversion work remains: the system identifies as Kali, dpkg
+# is consistent, and the recorded metapackage is installed. Used on resume to
+# recognize a marker whose conversion was finished out-of-band (manually, or
+# by a crash after the last real step) - without this, the preflight could
+# block the tool from ever converging and cleaning its own marker.
+conversion_complete() {
+    [ "$(osr ID || true)" = "kali" ] || return 1
+    [ -z "$(dpkg --audit 2>/dev/null)" ] || return 1
+    local mp
+    mp=$(kv_get "$STATE_FILE" metapackage)
+    [ -z "$mp" ] || dpkg -s "$mp" 2>/dev/null | grep -q '^Status: install ok installed'
 }
 
 # Resume: put dpkg/apt back into a consistent state before re-running the
@@ -2734,8 +2849,8 @@ repair_packages() {
 # written (so the marker only pre-exists on resume) and persisted in it, so a
 # resumed run converges on the same choice.
 resolve_metapackage() {
-    if [ -z "$KALI_METAPACKAGE" ] && [ -r "$STATE_FILE" ]; then
-        KALI_METAPACKAGE=$(grep -E '^metapackage=' "$STATE_FILE" | head -1 | cut -d= -f2- || true)
+    if [ -z "$KALI_METAPACKAGE" ]; then
+        KALI_METAPACKAGE=$(kv_get "$STATE_FILE" metapackage)
     fi
     if [ -z "$KALI_METAPACKAGE" ]; then
         if has_desktop; then KALI_METAPACKAGE=kali-linux-default; else KALI_METAPACKAGE=kali-linux-headless; fi
@@ -2841,6 +2956,11 @@ main() {
     # mid-conversion, so the already-Kali and distro checks are skipped.
     if [ -f "$STATE_FILE" ]; then
         RESUME=true
+        if conversion_complete; then
+            finish_conversion
+            ok "Previous conversion is already complete - removed the leftover resume marker."
+            exit 0
+        fi
         warn "Interrupted conversion detected ($STATE_FILE) - resuming."
     else
         check_already_kali
