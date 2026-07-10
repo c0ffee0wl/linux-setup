@@ -149,7 +149,7 @@ Use this flag to apply only supply-chain hardening configurations without instal
 2. **Package updates**: Updates system packages and repositories
 3. **Tool installation**: Installs all development and productivity tools
 4. **Configuration**: Sets up shell, terminal, and system preferences (on XFCE, disables the screensaver, lock screen, and display power management/DPMS)
-5. **Security setup**: Configures Docker and sandboxing tools
+5. **Security setup**: Configures Docker, the Docker/UFW firewall integration, and sandboxing tools
 6. **Cleanup**: Removes unnecessary packages and cleans package cache
 
 ## Post-Installation
@@ -909,6 +909,7 @@ The script creates/modifies these configuration files:
 
 **System Configuration:**
 - `/etc/systemd/resolved.conf.d/disable-stub.conf` - DNS stub listener configuration
+- `/etc/ufw/after.rules` - Docker/UFW firewall rules (appended by ufw-docker, only when UFW is active)
 - `/etc/apt/sources.list.d/docker.list` - Docker CE repository
 - `/etc/apt/sources.list.d/vscode.sources` - Visual Studio Code repository
 - `/etc/apt/sources.list.d/microsoft-prod.sources` - Microsoft PowerShell repository (only when PowerShell is installed from Microsoft's repo, i.e. non-Kali)
@@ -924,6 +925,7 @@ The script creates/modifies these configuration files:
 - **Config confirmation**: Prompts before overwriting existing dotfiles and changing the default shell (package installs run automatically)
 - **Sandboxed tools**: Includes bubblewrap for command isolation
 - **Docker security**: On Kali, the user is added to the docker group (requires logout); on other distributions this is left opt-in, because docker group membership is root-equivalent
+- **Docker/UFW firewall (ufw-docker)**: Docker writes its own iptables rules when it publishes a container port, and they sidestep UFW - so a `ufw deny` won't block a port you exposed with `docker run -p`. This catches a lot of people out. The script downloads [ufw-docker](https://github.com/chaifeng/ufw-docker) to `/usr/local/bin`, and when UFW is already active it offers to fix this (`ufw-docker install` + `ufw reload`). It never turns UFW on for you, so it can't lock you out over SSH. Once applied, published ports are blocked from outside by default and you open the ones you want with `sudo ufw-docker allow <container> <port>`; host rules like SSH (the INPUT chain) are left alone. The step asks first (auto-yes under `--force`, auto-no under `--no`), lists any running containers that publish ports so you can see what's affected, and skips itself on re-runs once the rules are in place. If UFW is inactive, it prints the command to run later instead: `sudo ufw enable && sudo ufw-docker install && sudo ufw reload`
 - **Supply-chain hardening** (all configs consolidated in `apply_supply_chain_hardening()`, runnable standalone via `--harden-only`):
   - npm: `ignore-scripts=true`, `save-exact=true`, 7-day `min-release-age` quarantine
   - Bun: exact version pinning, 7-day `minimumReleaseAge`, text lockfiles
