@@ -179,10 +179,13 @@ sudo upgrade-to-kali --yes    # non-interactive (skip the confirmation)
 
 What it does:
 
-1. Adds the Kali `kali-rolling` repository and archive keyring
-2. **Disables** the existing Debian repositories, since Kali doesn't support mixing Debian and Kali repos
-3. Runs a full `apt full-upgrade` against `kali-rolling`, which rebases the base system onto Kali
-4. Installs a Kali metapackage: `kali-linux-default` if a desktop is detected, otherwise `kali-linux-headless` (override with the `KALI_METAPACKAGE` env var)
+1. Runs a disk-space preflight. On systemd-boot systems (e.g. DigitalOcean droplets) the kernel **and full initrd** are copied onto the EFI System Partition, and Kali initrds (~200 MB) are far larger than Debian's — a too-small ESP would break the upgrade midway. The preflight offers to remove stale/truncated boot files from the ESP and, on VMs, to write a `MODULES=dep` initramfs config that shrinks the initrds enough to fit; otherwise it aborts with manual guidance before anything is changed (`--skip-preflight` to override)
+2. Adds the Kali `kali-rolling` repository and archive keyring
+3. **Disables** the existing Debian repositories, since Kali doesn't support mixing Debian and Kali repos (backups go to `/etc/apt/upgrade-to-kali-backup/`)
+4. Runs a full `apt full-upgrade` against `kali-rolling`, which rebases the base system onto Kali
+5. Installs a Kali metapackage: `kali-linux-default` if a desktop is detected, otherwise `kali-linux-headless` (override with the `KALI_METAPACKAGE` env var)
+
+If the conversion fails midway (network drop, disk full, Ctrl-C), it prints the recovery commands and leaves a marker at `/var/lib/upgrade-to-kali/state` — just re-run `sudo upgrade-to-kali` and it repairs dpkg and resumes where it left off. The `MODULES=dep` config written on VMs persists after conversion (revert instructions are inside the file, `/etc/initramfs-tools/conf.d/upgrade-to-kali-modules.conf`).
 
 > **⚠️ Important**: This is effectively irreversible, so take a VM snapshot or backup first. It only works on Debian, not Ubuntu. From Debian 12 (bookworm) it's a larger jump than from 13, because the rebase skips a Debian release. After it finishes, reboot and (optionally) re-run `linux-setup.sh`; it will detect Kali this time and install the pentest tooling.
 

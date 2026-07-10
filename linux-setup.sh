@@ -12,7 +12,7 @@ set -eo pipefail
 export LC_ALL=C.UTF-8
 export LANG=C.UTF-8
 
-VERSION="2.14.1"
+VERSION="2.15.0"
 FORCE_MODE=false
 NO_MODE=false
 NO_HACKING_TOOLS=false
@@ -2310,18 +2310,32 @@ set -eo pipefail
 export LC_ALL=C.UTF-8
 export LANG=C.UTF-8
 
-VERSION="1.0.1"
+VERSION="1.1.0"
 
-# Overridable paths: production defaults; overridden only by tests.
+# Overridable paths/thresholds: production defaults; overridden by tests, or by
+# an operator to steer detection (e.g. ESP_PATH when auto-detection misfires).
 OS_RELEASE_FILE="${OS_RELEASE_FILE:-/etc/os-release}"
 APT_DIR="${APT_DIR:-/etc/apt}"
+BACKUP_DIR="${BACKUP_DIR:-$APT_DIR/upgrade-to-kali-backup}"
 KEYRING_PATH="${KEYRING_PATH:-/usr/share/keyrings/kali-archive-keyring.gpg}"
 KEYRING_URL="${KEYRING_URL:-https://archive.kali.org/archive-keyring.gpg}"
 KALI_MIRROR="${KALI_MIRROR:-http://http.kali.org/kali}"
+BOOT_DIR="${BOOT_DIR:-/boot}"
+ESP_PATH="${ESP_PATH:-}"
+MACHINE_ID_FILE="${MACHINE_ID_FILE:-/etc/machine-id}"
+ENTRY_TOKEN_FILE="${ENTRY_TOKEN_FILE:-/etc/kernel/entry-token}"
+INITRAMFS_CONF_DIR="${INITRAMFS_CONF_DIR:-/etc/initramfs-tools/conf.d}"
+MODULES_CONF="${MODULES_CONF:-$INITRAMFS_CONF_DIR/upgrade-to-kali-modules.conf}"
+STATE_FILE="${STATE_FILE:-/var/lib/upgrade-to-kali/state}"
+ROOT_MIN_FREE_KIB="${ROOT_MIN_FREE_KIB:-6291456}"    # 6 GiB, warn-only
+ESP_FLOOR_MOST_KIB="${ESP_FLOOR_MOST_KIB:-307200}"   # 300 MiB (Debian trixie guidance)
+ESP_FLOOR_DEP_KIB="${ESP_FLOOR_DEP_KIB:-65536}"      # 64 MiB
 # Empty means auto-select at conversion time: kali-linux-default when a desktop
 # is present, else kali-linux-headless. Set the env var to force a choice.
 KALI_METAPACKAGE="${KALI_METAPACKAGE:-}"
 ASSUME_YES=false
+RESUME=false
+SKIP_PREFLIGHT=false
 
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
     C_RED='\033[0;31m'; C_GREEN='\033[0;32m'; C_YELLOW='\033[1;33m'
@@ -2343,12 +2357,23 @@ Usage: sudo upgrade-to-kali [OPTIONS]
 
 Options:
   -y, --yes, --force   Skip the confirmation prompt (non-interactive).
+  --skip-preflight     Skip the disk-space preflight checks.
   -h, --help           Show this help and exit.
 
 This adds the Kali repository, DISABLES the Debian sources, runs a full
 system upgrade against kali-rolling, and installs a Kali metapackage
 (kali-linux-default when a desktop is present, else kali-linux-headless).
 The base-system rebase is effectively irreversible - snapshot/back up first.
+
+Before converting, a preflight checks free disk space. On systemd-boot
+systems the kernel and full initrd are copied onto the EFI System Partition,
+and Kali initrds are much larger than Debian's - a too-small ESP aborts the
+run. On virtual machines the tool offers to write a persistent MODULES=dep
+initramfs config (revert instructions inside the written file) so the
+initrds shrink enough to fit.
+
+If a conversion is interrupted, a marker is left at ${STATE_FILE} and
+re-running 'sudo upgrade-to-kali' repairs dpkg and resumes the conversion.
 USAGE
 }
 
@@ -2356,6 +2381,7 @@ parse_args() {
     while [ $# -gt 0 ]; do
         case "$1" in
             -y|--yes|--force) ASSUME_YES=true ;;
+            --skip-preflight) SKIP_PREFLIGHT=true ;;
             -h|--help) usage; exit 0 ;;
             *) usage; err "Unknown option: $1" ;;
         esac
@@ -2403,12 +2429,25 @@ check_supported_distro() {
 
 confirm() {
     $ASSUME_YES && return 0
-    warn "This will REBASE this system onto Kali Linux (kali-rolling)."
+    if $RESUME; then
+        warn "This will RESUME the interrupted conversion to Kali (marker: $STATE_FILE)."
+    else
+        warn "This will REBASE this system onto Kali Linux (kali-rolling)."
+    fi
     warn "It disables the Debian repositories and upgrades every base package."
     warn "This is effectively IRREVERSIBLE. Make a snapshot/backup first."
     printf 'Type YES to proceed: '
     local r; read -r r
     [ "$r" = "YES" ] || err "Aborted by user."
+}
+
+# Small yes/no prompt for individual remediation steps; auto-yes under --yes.
+ask_yn() {
+    if $ASSUME_YES; then log "$1 -> yes (--yes)"; return 0; fi
+    local r
+    printf '%s [Y/n] ' "$1"
+    read -r r
+    [ -z "$r" ] || [ "$r" = "y" ] || [ "$r" = "Y" ]
 }
 
 # Non-interactive apt-get: lock-wait + safe conffile handling.
@@ -2419,10 +2458,289 @@ apt_ni() {
         "$@"
 }
 
+# Timestamped copies go to $BACKUP_DIR - outside sources.list.d, so apt does
+# not print "N: Ignoring file ..." notices about them.
 backup_file() {
     local f="$1"
     [ -f "$f" ] || return 0
-    cp -a "$f" "${f}.backup.$(date +'%Y-%m-%d_%H-%M-%S')"
+    mkdir -p "$BACKUP_DIR"
+    cp -a "$f" "$BACKUP_DIR/$(basename "$f").backup.$(date +'%Y-%m-%d_%H-%M-%S')"
+}
+
+# Move backup/disabled artifacts a v1.0.x run left inside sources.list.d into
+# $BACKUP_DIR - they make apt print "N: Ignoring file ..." notices on every
+# apt invocation. Called from main so already-converted systems (where the
+# litter actually lives) get cleaned too.
+sweep_legacy_backups() {
+    local litter
+    litter=$(find "$APT_DIR/sources.list.d" -maxdepth 1 -type f \
+        \( -name '*.backup.*' -o -name '*.disabled-by-upgrade-to-kali' \) 2>/dev/null || true)
+    [ -n "$litter" ] || return 0
+    mkdir -p "$BACKUP_DIR"
+    printf '%s\n' "$litter" | xargs -d '\n' mv -t "$BACKUP_DIR"
+    log "Moved old upgrade-to-kali backup files to $BACKUP_DIR (silences apt notices)"
+}
+
+# --- Disk-space preflight ---------------------------------------------------
+# On systemd-boot systems kernel-install copies the kernel AND the full initrd
+# onto the EFI System Partition, and Kali's MODULES=most initrds (~200 MB) are
+# far larger than Debian's - on the small ESPs of cloud images (e.g.
+# DigitalOcean) the copy fails mid-upgrade and leaves dpkg half-configured.
+# Detect that layout, make room (stale-copy cleanup, MODULES=dep on VMs), or
+# abort with guidance BEFORE anything irreversible happens.
+
+# A missing systemd-detect-virt (rc 127) counts as "not a VM" - conservative,
+# since the MODULES=dep remediation is only safe when hardware cannot change.
+is_vm() {
+    systemd-detect-virt --vm --quiet 2>/dev/null
+}
+
+# kernel-install entry token: explicit file, else the machine id.
+entry_token() {
+    if [ -s "$ENTRY_TOKEN_FILE" ]; then
+        cat "$ENTRY_TOKEN_FILE"
+    elif [ -s "$MACHINE_ID_FILE" ]; then
+        cat "$MACHINE_ID_FILE"
+    fi
+}
+
+# Print the ESP mountpoint, or nothing when there is none (BIOS boot).
+# Fallback order mirrors kernel-install's $BOOT search; autofs is accepted
+# because newer Debian automounts the ESP (the later path accesses in
+# kernels_on_esp/clean_stale_esp_copies trigger the mount before df runs).
+find_esp() {
+    if [ -n "$ESP_PATH" ]; then printf '%s' "$ESP_PATH"; return 0; fi
+    local p d t
+    p=$(bootctl --print-esp-path 2>/dev/null || true)   # absent bootctl -> empty
+    if [ -z "$p" ]; then
+        for d in /efi /boot /boot/efi; do
+            t=$(findmnt -n -o FSTYPE "$d" 2>/dev/null || true)
+            case "$t" in vfat|autofs) p="$d"; break ;; esac
+        done
+    fi
+    printf '%s' "$p"
+}
+
+# True when kernel-install copies kernels+initrds onto the ESP ($1).
+kernels_on_esp() {
+    local esp="$1" token
+    token=$(entry_token)
+    if [ -n "$token" ] && compgen -G "$esp/$token/*/linux" > /dev/null; then return 0; fi
+    if compgen -G "$esp/loader/entries/*.conf" > /dev/null; then return 0; fi
+    # Debian's systemd-boot package hooks: the exact mechanism that copies
+    # kernels/initrds during dpkg configure, even while the ESP is still empty.
+    [ -e /etc/kernel/postinst.d/zz-systemd-boot ] && return 0
+    [ -e /etc/initramfs/post-update.d/systemd-boot ] && return 0
+    return 1
+}
+
+free_kib() {
+    df -Pk "$1" | awk 'NR==2 {print $4}'
+}
+
+# Largest du -k of the given files; 0 when none exist.
+max_file_kib() {
+    local m=0 f s
+    for f in "$@"; do
+        [ -f "$f" ] || continue
+        s=$(du -k "$f" | cut -f1)
+        if [ "$s" -gt "$m" ]; then m=$s; fi
+    done
+    printf '%s' "$m"
+}
+
+# Estimated KiB the incoming Kali kernel+initrd needs on the ESP.
+# $1 = most|dep (the initramfs MODULES policy the estimate is for).
+# 2x the largest local kernel+initrd pair, with a floor: a Debian cloud
+# kernel's ~30 MB initrd predicts nothing about Kali's ~200 MB one, so the
+# floor (the Debian trixie release notes' "at least 300 MB free" guidance
+# for systemd-boot layouts) carries the MODULES=most check.
+esp_required_kib() {
+    local floor need
+    case "$1" in
+        dep) floor="$ESP_FLOOR_DEP_KIB" ;;
+        *)   floor="$ESP_FLOOR_MOST_KIB" ;;
+    esac
+    need=$(( ( $(max_file_kib "$BOOT_DIR"/vmlinuz-*) + $(max_file_kib "$BOOT_DIR"/initrd.img-*) ) * 2 ))
+    if [ "$need" -lt "$floor" ]; then need=$floor; fi
+    printf '%s' "$need"
+}
+
+# Logs the ESP's ($1) free space vs. the estimated need for MODULES=$2;
+# true when it fits.
+esp_fits() {
+    local need free
+    need=$(esp_required_kib "$2")
+    free=$(free_kib "$1")
+    log "ESP free: $((free / 1024)) MiB; estimated need (MODULES=$2): $((need / 1024)) MiB"
+    [ "$free" -ge "$need" ]
+}
+
+# True when both files exist but their sizes differ (a mid-copy ENOSPC leftover).
+size_mismatch() {
+    [ -f "$1" ] && [ -f "$2" ] && [ "$(stat -c %s "$1")" != "$(stat -c %s "$2")" ]
+}
+
+# Remove provably-stale boot files from the ESP (prompted): version dirs for
+# kernels that no longer exist locally, and truncated/partial copies whose
+# size differs from the /boot source (what a mid-copy ENOSPC leaves behind).
+# Safe because the source of truth stays in $BOOT_DIR - dpkg configure and the
+# initramfs post-update hook re-copy fresh files. Must run before measuring
+# free space AND before any resume repair: dpkg --configure -a re-triggers
+# the same ENOSPC otherwise.
+clean_stale_esp_copies() {
+    local esp="$1" token verdir ver f
+    local stale=()
+    token=$(entry_token)
+    [ -n "$token" ] && [ -d "$esp/$token" ] || return 0
+    for verdir in "$esp/$token"/*/; do
+        [ -d "$verdir" ] || continue
+        ver=$(basename "$verdir")
+        if [ ! -e "$BOOT_DIR/vmlinuz-$ver" ] && [ ! -d "/lib/modules/$ver" ]; then
+            stale+=("$verdir")   # orphan version: kernel is gone from the system
+            continue
+        fi
+        for f in "$verdir"initrd*; do
+            if size_mismatch "$f" "$BOOT_DIR/initrd.img-$ver"; then stale+=("$f"); fi
+        done
+        if size_mismatch "${verdir}linux" "$BOOT_DIR/vmlinuz-$ver"; then stale+=("${verdir}linux"); fi
+    done
+    [ "${#stale[@]}" -gt 0 ] || return 0
+    warn "Stale/incomplete boot files on the ESP (safe to remove; re-copied from $BOOT_DIR):"
+    printf '      %s\n' "${stale[@]}" >&2
+    ask_yn "Remove them to free ESP space?" || return 0
+    local it
+    for it in "${stale[@]}"; do
+        rm -rf "$it"
+        case "$it" in
+            */) rm -f "$esp"/loader/entries/*"$(basename "$it")"*.conf ;;
+        esac
+    done
+    ok "Removed ${#stale[@]} stale ESP item(s)"
+}
+
+# Write a persistent MODULES=dep initramfs policy and regenerate all initrds
+# so they fit the small ESP. Offered on VMs only (hardware does not change).
+shrink_initramfs() {
+    log "Writing $MODULES_CONF (MODULES=dep) and regenerating initrds"
+    mkdir -p "$INITRAMFS_CONF_DIR"
+    cat > "$MODULES_CONF" << 'CONF'
+# Written by upgrade-to-kali: MODULES=dep keeps initrds small enough for this
+# system's small EFI System Partition (systemd-boot copies kernel+initrd there).
+# Safe on VMs, where the (virtual) hardware does not change.
+# Revert: delete this file, then run: sudo update-initramfs -u -k all
+MODULES=dep
+CONF
+    if ! update-initramfs -u -k all; then
+        warn "update-initramfs failed - the ESP is likely still too full."
+        warn "Free ESP space manually (purge old kernels, remove stale files), then re-run."
+        err "Could not regenerate a smaller initrd."
+    fi
+}
+
+preflight() {
+    if $SKIP_PREFLIGHT; then
+        warn "Preflight checks skipped (--skip-preflight)"
+        return 0
+    fi
+    # Root filesystem: warn only - the rebase downloads ~2 GB of archives and
+    # installs several GB on top.
+    local rootfree
+    rootfree=$(free_kib /)
+    if [ "$rootfree" -lt "$ROOT_MIN_FREE_KIB" ]; then
+        warn "Low free space on /: $((rootfree / 1024)) MiB (recommended: >= $((ROOT_MIN_FREE_KIB / 1024)) MiB)."
+    fi
+    # ESP: fatal when kernels are copied there and room cannot be made.
+    local esp
+    esp=$(find_esp)
+    if [ -z "$esp" ]; then
+        log "No EFI System Partition detected (BIOS boot) - ESP check skipped."
+        return 0
+    fi
+    if ! kernels_on_esp "$esp"; then
+        log "Kernels are not copied to the ESP (GRUB layout) - ESP check skipped."
+        return 0
+    fi
+    log "systemd-boot layout detected: kernels and initrds are copied to $esp"
+    clean_stale_esp_copies "$esp"
+    if esp_fits "$esp" most; then
+        ok "ESP has enough free space."
+        return 0
+    fi
+    if is_vm; then
+        warn "The ESP is too small for Kali's default (MODULES=most) initrd."
+        if ask_yn "Write MODULES=dep to $MODULES_CONF and regenerate initrds now (VM-safe, persistent)?"; then
+            shrink_initramfs
+            if esp_fits "$esp" dep; then
+                ok "ESP has enough free space with MODULES=dep."
+                return 0
+            fi
+        fi
+    fi
+    warn "The ESP ($esp) does not have enough free space for the Kali kernel+initrd."
+    warn "Fix manually, then re-run one of:"
+    warn "  - echo MODULES=dep > $MODULES_CONF && update-initramfs -u -k all"
+    warn "    (VM-safe; on changing hardware prefer COMPRESS=xz in /etc/initramfs-tools/initramfs.conf)"
+    warn "  - purge old kernels: dpkg -l 'linux-image-*', then apt-get purge <old versions>"
+    warn "  - remove leftover version dirs under $esp/<machine-id>/ ('bootctl cleanup' on systemd >= 253)"
+    warn "  - grow the ESP (needs repartitioning)"
+    err "Aborting before any conversion step (nothing was converted)."
+}
+
+# --- Conversion state & failure guidance ------------------------------------
+
+# Printed on any nonzero exit after the conversion has started (set -e death,
+# err(), or Ctrl-C - bash runs EXIT traps on fatal signals too).
+on_exit() {
+    local rc=$?
+    [ "$rc" -eq 0 ] && return 0
+    warn "Conversion did NOT complete (exit code $rc). The system may be part-Debian, part-Kali."
+    warn "Recover manually:"
+    warn "  1. sudo dpkg --configure -a"
+    warn "  2. sudo apt-get -f install"
+    warn "  3. sudo apt-get update && sudo apt-get -y full-upgrade"
+    warn "  4. sudo apt-get install -y kali-archive-keyring ${KALI_METAPACKAGE:-kali-linux-headless}"
+    warn "  5. sudo apt-get -y autoremove --purge"
+    warn "Or simply re-run 'sudo upgrade-to-kali': the state marker ($STATE_FILE) was kept,"
+    warn "so it will repair dpkg and resume. If this failure was 'No space left on device'"
+    warn "on the EFI partition, the re-run's preflight offers cleanup and a smaller initrd."
+}
+
+mark_conversion_started() {
+    mkdir -p "$(dirname "$STATE_FILE")"
+    {
+        printf 'version=%s\n' "$VERSION"
+        printf 'started=%s\n' "$(date -Is)"
+        printf 'metapackage=%s\n' "$KALI_METAPACKAGE"
+    } > "$STATE_FILE"
+    trap on_exit EXIT
+}
+
+finish_conversion() {
+    rm -f "$STATE_FILE"
+    rmdir "$(dirname "$STATE_FILE")" 2>/dev/null || true
+    trap - EXIT
+}
+
+# Resume: put dpkg/apt back into a consistent state before re-running the
+# (idempotent) conversion steps.
+repair_packages() {
+    log "Resuming: repairing any half-configured packages first"
+    dpkg --configure -a
+    apt_ni -y -f install
+}
+
+# env var > state file > desktop detection. Resolved before the marker is
+# written (so the marker only pre-exists on resume) and persisted in it, so a
+# resumed run converges on the same choice.
+resolve_metapackage() {
+    if [ -z "$KALI_METAPACKAGE" ] && [ -r "$STATE_FILE" ]; then
+        KALI_METAPACKAGE=$(grep -E '^metapackage=' "$STATE_FILE" | head -1 | cut -d= -f2- || true)
+    fi
+    if [ -z "$KALI_METAPACKAGE" ]; then
+        if has_desktop; then KALI_METAPACKAGE=kali-linux-default; else KALI_METAPACKAGE=kali-linux-headless; fi
+    fi
+    log "Target Kali metapackage: $KALI_METAPACKAGE"
 }
 
 install_keyring() {
@@ -2454,8 +2772,8 @@ disable_debian_sources() {
     local deb822="$APT_DIR/sources.list.d/debian.sources"
     if [ -f "$deb822" ]; then
         backup_file "$deb822"
-        mv "$deb822" "${deb822}.disabled-by-upgrade-to-kali"
-        log "Disabled $deb822"
+        mv "$deb822" "$BACKUP_DIR/debian.sources.disabled-by-upgrade-to-kali"
+        log "Disabled $deb822 (moved to $BACKUP_DIR)"
     fi
     local legacy="$APT_DIR/sources.list"
     if [ -f "$legacy" ] && grep -qE '^[[:space:]]*deb(-src)?[[:space:]]' "$legacy"; then
@@ -2485,10 +2803,6 @@ has_desktop() {
 }
 
 do_conversion() {
-    if [ -z "$KALI_METAPACKAGE" ]; then
-        if has_desktop; then KALI_METAPACKAGE=kali-linux-default; else KALI_METAPACKAGE=kali-linux-headless; fi
-    fi
-    log "Target Kali metapackage: $KALI_METAPACKAGE"
     # The keyring download needs only wget and the CA bundle, both present on
     # any normal install - skip refreshing the soon-to-be-disabled Debian
     # indexes unless something is actually missing.
@@ -2508,6 +2822,7 @@ do_conversion() {
     apt_ni install -y kali-archive-keyring "$KALI_METAPACKAGE"
     log "Removing packages that are no longer required"
     apt_ni -y autoremove --purge
+    finish_conversion
     ok "Conversion complete. New system identity:"
     grep -E '^(PRETTY_NAME|ID|VERSION)=' "$OS_RELEASE_FILE" | sed 's/^/    /'
     warn "A reboot is recommended: sudo reboot"
@@ -2520,9 +2835,22 @@ main() {
         log "Elevating privileges with sudo..."
         exec sudo bash "$0" "$@"
     fi
-    check_already_kali
-    check_supported_distro
+    sweep_legacy_backups
+    # A marker from an interrupted conversion switches to resume mode (checked
+    # as root - the marker is root-owned); os-release may already report Kali
+    # mid-conversion, so the already-Kali and distro checks are skipped.
+    if [ -f "$STATE_FILE" ]; then
+        RESUME=true
+        warn "Interrupted conversion detected ($STATE_FILE) - resuming."
+    else
+        check_already_kali
+        check_supported_distro
+    fi
+    preflight
+    resolve_metapackage
     confirm
+    mark_conversion_started
+    if $RESUME; then repair_packages; fi
     do_conversion
 }
 
