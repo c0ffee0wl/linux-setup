@@ -5,7 +5,14 @@
 
 set -eo pipefail
 
-VERSION="2.12.0"
+# Deterministic, English command output regardless of the host locale (German,
+# etc.) so parsed strings match (ufw "Status: active", apt-cache "Candidate:").
+# C.UTF-8 is built into glibc (no locale-gen needed on stock/minimal VMs) and
+# preserves UTF-8. Affects only this process, not the installed system's locale.
+export LC_ALL=C.UTF-8
+export LANG=C.UTF-8
+
+VERSION="2.13.0"
 FORCE_MODE=false
 NO_MODE=false
 NO_HACKING_TOOLS=false
@@ -2274,8 +2281,35 @@ if ! command -v ufw-docker &> /dev/null; then
 else
     log "ufw-docker is already installed"
 fi
-log "Enable ufw and ufw-docker with: "
-log "sudo ufw enable && sudo ufw-docker install && sudo systemctl restart ufw"
+# Apply ufw-docker rules only when the firewall is already active. We never enable
+# ufw ourselves (that risks SSH lockout), so this fires only on an already-firewalled
+# box. LC_ALL is passed on sudo's command line (sudo resets the env, so the global
+# export doesn't reach it) to force a locale-independent "Status: active" match.
+if command -v docker &> /dev/null && command -v ufw &> /dev/null \
+        && sudo LC_ALL=C.UTF-8 ufw status 2>/dev/null | grep -Fq "Status: active"; then
+    if sudo grep -q "^# BEGIN UFW AND DOCKER" /etc/ufw/after.rules 2>/dev/null; then
+        log "ufw-docker rules already present in /etc/ufw/after.rules; nothing to do"
+    else
+        warn "ufw is active. Applying ufw-docker BLOCKS external access to all published"
+        warn "Docker container ports (FORWARD/DOCKER-USER chain only - host services like"
+        warn "SSH are unaffected). Re-expose a port with: sudo ufw-docker allow <container> <port>"
+        published="$(docker ps --format '{{.Names}} {{.Ports}}' 2>/dev/null | grep -F '->' || true)"
+        [[ -n "$published" ]] && { warn "Currently published containers:"; printf '%s\n' "$published"; }
+        if prompt_yes_no "Apply ufw-docker firewall rules now?" "Y"; then
+            if sudo ufw-docker install; then
+                sudo ufw reload || warn "ufw reload failed; run 'sudo ufw reload' manually to apply the rules"
+                log "ufw-docker rules applied. Expose a port with: sudo ufw-docker allow <container> <port>"
+            else
+                warn "ufw-docker install failed; apply manually with: sudo ufw-docker install && sudo ufw reload"
+            fi
+        else
+            log "Skipped applying ufw-docker rules"
+        fi
+    fi
+else
+    log "ufw is not active; skipping ufw-docker rules"
+    log "To harden Docker ports later: sudo ufw enable && sudo ufw-docker install && sudo ufw reload"
+fi
 
 # Configure systemd-resolved to disable stub listener if installed
 log "Configuring systemd-resolved..."
