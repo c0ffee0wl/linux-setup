@@ -601,10 +601,12 @@ Like `bat`, it reads your terminal background and picks colors to match. Install
 ```bash
 uv --help
 
-# Virtual environment management
-uv venv .venv
-source .venv/bin/activate
-uv pip install flask
+# Virtual environment management. uv uses the project's ./.venv on its own,
+# so you rarely have to activate it; run things with `uv run` instead of
+# `source .venv/bin/activate`.
+uv venv                       # create the venv (defaults to ./.venv)
+uv pip install flask          # goes straight into ./.venv
+uv run python app.py          # runs in ./.venv, no activation
 
 # Run Python tools without installing (uvx is shorthand for uv tool run)
 uv tool run ruff                      # Run tool without parameters
@@ -660,6 +662,8 @@ The script wires fzf's shell integration into zsh, so these work at the prompt:
 - `**<Tab>` - fuzzy completion trigger, for example `vim **<Tab>`, `kill **<Tab>`, or `ssh **<Tab>`
 
 Terminator uses `Ctrl+T` for new tabs and grabs it before the shell sees it, so the file widget is also bound to `Alt+T`; use that one inside Terminator. `Ctrl+R` stays with hstr (see above); fzf does not take it over. When fd is present, the file and directory lists come from it, so they respect `.gitignore` and include hidden files.
+
+> **Note**: If you install the companion [Zap](https://github.com/c0ffee0wl/zap-setup) terminal, a couple of these behave differently. `Alt+T` and `Alt+C` won't fire, because Zap only forwards `Alt` chords to the shell when "Left Alt key is Meta" is turned on (Settings → Features), which ships off by default. And `Ctrl+R` opens Zap's own command search rather than reaching hstr. You don't lose much: Zap's search does hstr's job, and you won't miss the `Alt` widgets.
 
 > **Note**: The `cd` command is replaced by `zoxide` for smart frecency-based directory navigation.
 
