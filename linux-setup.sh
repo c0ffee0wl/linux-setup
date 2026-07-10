@@ -5,7 +5,7 @@
 
 set -eo pipefail
 
-VERSION="2.11.1"
+VERSION="2.12.0"
 FORCE_MODE=false
 NO_MODE=false
 NO_HACKING_TOOLS=false
@@ -127,6 +127,16 @@ warn() {
 error() {
     echo -e "${RED}[ERROR]${NC} $1"
     exit 1
+}
+
+# Optional source-built tools that failed to build/install this run (OOM on
+# low-RAM VMs, transient network/upstream errors). Collected here and reported at
+# the end; the run continues rather than aborting because every source-built tool
+# is optional and the embedded .zshrc guards each one at runtime.
+FAILED_BUILDS=()
+note_build_failure() {
+    warn "$1 failed to install (continuing without it) - the shell config guards its absence"
+    FAILED_BUILDS+=("$1")
 }
 
 # Check if running as root
@@ -591,7 +601,9 @@ install_go_tool() {
     export PATH=$HOME/go/bin:$PATH
     export GOPROXY="https://proxy.golang.org,off"
     export GOSUMDB="sum.golang.org"
-    go install -v "$package_path"
+    # Non-fatal: a failed build (e.g. OOM on a low-RAM VM) is recorded and the run
+    # continues instead of aborting ('||' keeps 'set -e' from firing at the call site).
+    go install -v "$package_path" || note_build_failure "$tool_name"
 }
 
 # Install an apt package if not already present (idempotent, with logging).
@@ -707,7 +719,8 @@ install_cargo_tool() {
         else
             log "Installing ${bin_name} via cargo..."
         fi
-        cargo install "$cargo_crate" --locked
+        # Non-fatal (see install_go_tool): cargo builds are especially RAM-hungry.
+        cargo install "$cargo_crate" --locked || note_build_failure "$bin_name"
     else
         warn "${bin_name}: apt package too old/absent and cargo unavailable - skipping"
     fi
@@ -1172,101 +1185,6 @@ if ! command -v pwsh &> /dev/null; then
 else
     log "PowerShell is already installed"
 fi
-
-# Install up tool. Upstream github.com/akavel/up is discontinued/archived, so
-# freeze the installed build: "once" makes install_go_tool skip the rebuild when
-# 'up' is already on PATH (it lives in /usr/local/bin, always on PATH). This also
-# avoids pulling a potentially hijacked @latest from a dormant namespace.
-install_go_tool "up" "github.com/akavel/up@latest" once
-sudo cp "$HOME/go/bin/up" /usr/local/bin/ 2>/dev/null || true
-
-# Configure AppArmor to allow bwrap to create user namespaces
-# Ubuntu 24.04+ restricts unprivileged user namespaces via AppArmor by default,
-# which breaks bwrap sandboxing (used by the 'up' and 'polster' aliases)
-if command -v apparmor_parser &> /dev/null && \
-   [ -d /sys/module/apparmor ] && \
-   [ -f /proc/sys/kernel/apparmor_restrict_unprivileged_userns ] && \
-   [ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns)" = "1" ] && \
-   [ ! -f /etc/apparmor.d/bwrap ]; then
-    log "Configuring AppArmor profile for bwrap..."
-    if sudo tee /etc/apparmor.d/bwrap > /dev/null <<'APPARMOR'
-abi <abi/4.0>,
-include <tunables/global>
-
-profile bwrap /usr/bin/bwrap flags=(unconfined) {
-  userns,
-
-  include if exists <local/bwrap>
-}
-APPARMOR
-    then
-        sudo apparmor_parser -r /etc/apparmor.d/bwrap || warn "Failed to load AppArmor bwrap profile"
-    else
-        warn "Failed to write AppArmor bwrap profile"
-    fi
-else
-    log "AppArmor bwrap profile already configured or not needed"
-fi
-
-# Install Go-based tools
-GO_VERSION=$(get_go_version)
-MINIMUM_GO_VERSION=124  # Go 1.24
-
-install_go_tool "eget" "github.com/zyedidia/eget@latest"
-
-# yq and lazygit: prefer a recent apt package, else build with 'go install'
-# (needs Go 1.24+). yq's apt package is 'yq-go' (binary yq-go); we symlink 'yq'.
-install_go_tool_apt "yq"      "yq-go"   "$YQ_MIN"      "github.com/mikefarah/yq/v4@latest"       "yq-go"   "$MINIMUM_GO_VERSION"
-install_go_tool_apt "lazygit" "lazygit" "$LAZYGIT_MIN" "github.com/jesseduffield/lazygit@latest" "lazygit" "$MINIMUM_GO_VERSION"
-
-# lazydocker and gitsnip are not packaged in Debian/Ubuntu/Kali - always build (Go 1.24+)
-if [ "$GO_VERSION" -ge "$MINIMUM_GO_VERSION" ]; then
-    install_go_tool "lazydocker" "github.com/jesseduffield/lazydocker@latest"
-    install_go_tool "gitsnip" "github.com/dagimg-dot/gitsnip/cmd/gitsnip@latest"
-else
-    GO_VERSION_STR=$(go version 2>/dev/null | grep -oP 'go\K[0-9]+\.[0-9]+' | head -1 || true)
-    warn "Skipping lazydocker and gitsnip - require Go 1.24+, found Go ${GO_VERSION_STR:-unknown}"
-fi
-
-
-# Install zoxide: prefer a recent apt package (Kali/sid ship 0.9.x), else the
-# official installer (prebuilt binary into ~/.local/bin, first on PATH; the
-# script is fetched to a file so a truncated transfer can't execute). apt is
-# preferred because the installer's unauthenticated GitHub API call rate-limits
-# per IP and then fails with a misleading "not packaged for your arch" error.
-if apt_meets_min "zoxide" "$ZOXIDE_MIN"; then
-    install_apt_package "zoxide" "zoxide"
-    # Drop a stale installer-placed copy so the apt binary wins on PATH
-    rm -f "$HOME/.local/bin/zoxide"
-else
-    log "Installing/updating zoxide via official install script..."
-    ZOXIDE_INSTALLER=$(mktemp)
-    curl --proto '=https' --tlsv1.2 -sSfL \
-        https://raw.githubusercontent.com/ajeetdsouza/zoxide/main/install.sh \
-        -o "$ZOXIDE_INSTALLER"
-    sh "$ZOXIDE_INSTALLER" --bin-dir "$HOME/.local/bin"
-    rm -f "$ZOXIDE_INSTALLER"
-fi
-remove_source_builds "zoxide"   # drop stale ~/.cargo/bin copies from old runs
-
-# Install sd and delta: prefer a recent apt package (skips the cargo compile),
-# else build via cargo.
-install_cargo_tool "sd"     "sd"        "sd"        "$SD_MIN"
-install_cargo_tool "delta"  "git-delta" "git-delta" "$DELTA_MIN"
-
-# Configure delta as git pager
-if command -v delta &> /dev/null; then
-    log "Configuring delta as git pager..."
-    git config --global core.pager "delta"
-    git config --global interactive.diffFilter "delta --color-only"
-    git config --global delta.navigate "true"
-    git config --global merge.conflictstyle "zdiff3"
-fi
-
-# procs (modern ps) and dust (modern du, binary 'dust' from the du-dust package):
-# repo-only, no cargo fallback - install_apt_only skips releases that lack them.
-install_apt_only "procs" "procs"
-install_apt_only "dust"  "du-dust"
 
 # Disable screensaver and power management
 if has_desktop_environment; then
@@ -2196,6 +2114,114 @@ bind r source-file ~/.tmux.conf \; display-message "tmux.conf reloaded"
 EOF
 fi
 
+#############################################################################
+# Source-built CLI tools
+#############################################################################
+# Run last, after every config write (.zshrc, chsh, PowerShell profile,
+# Terminator, tmux) and the supply-chain hardening. A failed build here - an
+# OOM 'signal: killed' on a low-RAM VM, a transient network/upstream error -
+# is now non-fatal (note_build_failure), but running these last also means an
+# unexpected *fatal* error can never abort the script before the shell is set
+# up. Each tool is optional and guarded in the embedded .zshrc.
+# Install up tool. Upstream github.com/akavel/up is discontinued/archived, so
+# freeze the installed build: "once" makes install_go_tool skip the rebuild when
+# 'up' is already on PATH (it lives in /usr/local/bin, always on PATH). This also
+# avoids pulling a potentially hijacked @latest from a dormant namespace.
+install_go_tool "up" "github.com/akavel/up@latest" once
+sudo cp "$HOME/go/bin/up" /usr/local/bin/ 2>/dev/null || true
+
+# Configure AppArmor to allow bwrap to create user namespaces
+# Ubuntu 24.04+ restricts unprivileged user namespaces via AppArmor by default,
+# which breaks bwrap sandboxing (used by the 'up' and 'polster' aliases)
+if command -v apparmor_parser &> /dev/null && \
+   [ -d /sys/module/apparmor ] && \
+   [ -f /proc/sys/kernel/apparmor_restrict_unprivileged_userns ] && \
+   [ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns)" = "1" ] && \
+   [ ! -f /etc/apparmor.d/bwrap ]; then
+    log "Configuring AppArmor profile for bwrap..."
+    if sudo tee /etc/apparmor.d/bwrap > /dev/null <<'APPARMOR'
+abi <abi/4.0>,
+include <tunables/global>
+
+profile bwrap /usr/bin/bwrap flags=(unconfined) {
+  userns,
+
+  include if exists <local/bwrap>
+}
+APPARMOR
+    then
+        sudo apparmor_parser -r /etc/apparmor.d/bwrap || warn "Failed to load AppArmor bwrap profile"
+    else
+        warn "Failed to write AppArmor bwrap profile"
+    fi
+else
+    log "AppArmor bwrap profile already configured or not needed"
+fi
+
+# Install Go-based tools
+GO_VERSION=$(get_go_version)
+MINIMUM_GO_VERSION=124  # Go 1.24
+
+install_go_tool "eget" "github.com/zyedidia/eget@latest"
+
+# yq and lazygit: prefer a recent apt package, else build with 'go install'
+# (needs Go 1.24+). yq's apt package is 'yq-go' (binary yq-go); we symlink 'yq'.
+install_go_tool_apt "yq"      "yq-go"   "$YQ_MIN"      "github.com/mikefarah/yq/v4@latest"       "yq-go"   "$MINIMUM_GO_VERSION"
+install_go_tool_apt "lazygit" "lazygit" "$LAZYGIT_MIN" "github.com/jesseduffield/lazygit@latest" "lazygit" "$MINIMUM_GO_VERSION"
+
+# lazydocker and gitsnip are not packaged in Debian/Ubuntu/Kali - always build (Go 1.24+)
+if [ "$GO_VERSION" -ge "$MINIMUM_GO_VERSION" ]; then
+    install_go_tool "lazydocker" "github.com/jesseduffield/lazydocker@latest"
+    install_go_tool "gitsnip" "github.com/dagimg-dot/gitsnip/cmd/gitsnip@latest"
+else
+    GO_VERSION_STR=$(go version 2>/dev/null | grep -oP 'go\K[0-9]+\.[0-9]+' | head -1 || true)
+    warn "Skipping lazydocker and gitsnip - require Go 1.24+, found Go ${GO_VERSION_STR:-unknown}"
+fi
+
+
+# Install zoxide: prefer a recent apt package (Kali/sid ship 0.9.x), else the
+# official installer (prebuilt binary into ~/.local/bin, first on PATH; the
+# script is fetched to a file so a truncated transfer can't execute). apt is
+# preferred because the installer's unauthenticated GitHub API call rate-limits
+# per IP and then fails with a misleading "not packaged for your arch" error.
+if apt_meets_min "zoxide" "$ZOXIDE_MIN"; then
+    install_apt_package "zoxide" "zoxide"
+    # Drop a stale installer-placed copy so the apt binary wins on PATH
+    rm -f "$HOME/.local/bin/zoxide"
+else
+    log "Installing/updating zoxide via official install script..."
+    ZOXIDE_INSTALLER=$(mktemp)
+    # Non-fatal: a failed download/install records zoxide and continues (the
+    # .zshrc guards 'zoxide init' with $+commands[zoxide]). '&&'/'||' are
+    # left-associative, so this is (curl && sh) || note_build_failure.
+    curl --proto '=https' --tlsv1.2 -sSfL \
+        https://raw.githubusercontent.com/ajeetdsouza/zoxide/main/install.sh \
+        -o "$ZOXIDE_INSTALLER" \
+        && sh "$ZOXIDE_INSTALLER" --bin-dir "$HOME/.local/bin" \
+        || note_build_failure "zoxide"
+    rm -f "$ZOXIDE_INSTALLER"
+fi
+remove_source_builds "zoxide"   # drop stale ~/.cargo/bin copies from old runs
+
+# Install sd and delta: prefer a recent apt package (skips the cargo compile),
+# else build via cargo.
+install_cargo_tool "sd"     "sd"        "sd"        "$SD_MIN"
+install_cargo_tool "delta"  "git-delta" "git-delta" "$DELTA_MIN"
+
+# Configure delta as git pager
+if command -v delta &> /dev/null; then
+    log "Configuring delta as git pager..."
+    git config --global core.pager "delta"
+    git config --global interactive.diffFilter "delta --color-only"
+    git config --global delta.navigate "true"
+    git config --global merge.conflictstyle "zdiff3"
+fi
+
+# procs (modern ps) and dust (modern du, binary 'dust' from the du-dust package):
+# repo-only, no cargo fallback - install_apt_only skips releases that lack them.
+install_apt_only "procs" "procs"
+install_apt_only "dust"  "du-dust"
+
 if is_kali_linux && [ "$NO_HACKING_TOOLS" != true ]; then
 
     # Install Project Discovery tool manager (Kali-specific tools)
@@ -2315,6 +2341,12 @@ if has_desktop_environment; then
         xfconf-query -c xfce4-keyboard-shortcuts -p "/commands/custom/<Super>q" -r 2>/dev/null || true
         xfconf-query -c xfce4-keyboard-shortcuts -p "/commands/default/<Super>q" -r 2>/dev/null || true
     fi
+fi
+
+if [ ${#FAILED_BUILDS[@]} -gt 0 ]; then
+    warn "These optional source-built tools were skipped after a failed build:"
+    for t in "${FAILED_BUILDS[@]}"; do warn "  - $t"; done
+    warn "Your shell is fully configured regardless. Re-run to retry (on low-RAM VMs, add swap first)."
 fi
 
 log "Setup complete!"
