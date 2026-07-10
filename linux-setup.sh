@@ -12,7 +12,7 @@ set -eo pipefail
 export LC_ALL=C.UTF-8
 export LANG=C.UTF-8
 
-VERSION="2.13.0"
+VERSION="2.13.1"
 FORCE_MODE=false
 NO_MODE=false
 NO_HACKING_TOOLS=false
@@ -190,13 +190,16 @@ write_config_file() {
 # apt-get wrapper: in force/no mode run fully non-interactively so debconf
 # dialogs, dpkg conffile prompts, and Ubuntu's needrestart menu can't stall
 # unattended runs. sudo resets the environment, so the variables are passed
-# on sudo's command line rather than exported.
+# on sudo's command line rather than exported. DPkg::Lock::Timeout makes apt
+# wait for the lock instead of aborting when a boot-time apt job (cloud-init,
+# apt-daily, unattended-upgrades) still holds it - the classic cloud-init race.
 apt_get() {
     if [[ "$FORCE_MODE" == "true" || "$NO_MODE" == "true" ]]; then
         sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get \
+            -o DPkg::Lock::Timeout=300 \
             -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold "$@"
     else
-        sudo apt-get "$@"
+        sudo apt-get -o DPkg::Lock::Timeout=300 "$@"
     fi
 }
 
@@ -1700,7 +1703,7 @@ if (( $+commands[bwrap] )) && [[ -x /usr/local/bin/up ]]; then
 fi
 (( $+commands[bwrap] )) && alias polster='bwrap --die-with-parent --tmpfs /tmp --ro-bind /usr /usr --ro-bind /bin /bin --ro-bind /lib /lib --ro-bind /lib64 /lib64 --ro-bind /sbin /sbin --ro-bind /etc /etc --dev /dev --proc /proc --tmpfs /var --tmpfs /run --dir /run/user/$UID --tmpfs /usr/share --unshare-all --clearenv'
 
-alias upgrade-all='sudo apt-get update && sudo apt-get dist-upgrade; pipx upgrade-all'
+alias upgrade-all='sudo apt-get -o DPkg::Lock::Timeout=300 update && sudo apt-get -o DPkg::Lock::Timeout=300 dist-upgrade; pipx upgrade-all'
 
 # Git shortcuts. git is a hard dependency of this setup (self-update + delta
 # config assume it), so these stay unguarded like upgrade-all/ll. 'g' is the
