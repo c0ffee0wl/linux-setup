@@ -10,6 +10,7 @@
   - [Usage](#usage)
   - [What the script does:](#what-the-script-does)
 - [Post-Installation](#post-installation)
+- [Converting Debian to Kali (`upgrade-to-kali`)](#converting-debian-to-kali-upgrade-to-kali)
 - [Usage Examples](#usage-examples)
   - [Terminator Terminal](#terminator-terminal)
     - [Terminator Keyboard Shortcuts](#terminator-keyboard-shortcuts)
@@ -151,6 +152,7 @@ Use this flag to apply only supply-chain hardening configurations without instal
 4. **Configuration**: Sets up shell, terminal, and system preferences (on XFCE, disables the screensaver, lock screen, and display power management/DPMS)
 5. **Security setup**: Configures Docker, the Docker/UFW firewall integration, and sandboxing tools
 6. **Cleanup**: Removes unnecessary packages and cleans package cache
+7. **Debian→Kali helper** (Debian 12+ only): Installs the `upgrade-to-kali` converter to `/usr/local/bin`. It's installed but never run automatically.
 
 ## Post-Installation
 
@@ -165,6 +167,24 @@ After running the script:
    bun --version
    pwsh --version
    ```
+
+## Converting Debian to Kali (`upgrade-to-kali`)
+
+On **Debian 12 (bookworm) or newer**, the setup script drops a standalone converter at `/usr/local/bin/upgrade-to-kali`. It's installed but never run for you; run it yourself when you want to turn a Debian box into Kali.
+
+```bash
+sudo upgrade-to-kali          # asks for confirmation before the rebase
+sudo upgrade-to-kali --yes    # non-interactive (skip the confirmation)
+```
+
+What it does:
+
+1. Adds the Kali `kali-rolling` repository and archive keyring
+2. **Disables** the existing Debian repositories, since Kali doesn't support mixing Debian and Kali repos
+3. Runs a full `apt full-upgrade` against `kali-rolling`, which rebases the base system onto Kali
+4. Installs a Kali metapackage: `kali-linux-default` if a desktop is detected, otherwise `kali-linux-headless` (override with the `KALI_METAPACKAGE` env var)
+
+> **⚠️ Important**: This is effectively irreversible, so take a VM snapshot or backup first. It only works on Debian, not Ubuntu. From Debian 12 (bookworm) it's a larger jump than from 13, because the rebase skips a Debian release. After it finishes, reboot and (optionally) re-run `linux-setup.sh`; it will detect Kali this time and install the pentest tooling.
 
 ## Usage Examples
 

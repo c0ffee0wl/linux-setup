@@ -12,7 +12,7 @@ set -eo pipefail
 export LC_ALL=C.UTF-8
 export LANG=C.UTF-8
 
-VERSION="2.13.1"
+VERSION="2.14.0"
 FORCE_MODE=false
 NO_MODE=false
 NO_HACKING_TOOLS=false
@@ -2272,6 +2272,277 @@ if is_kali_linux && [ "$NO_HACKING_TOOLS" != true ]; then
 else
     log "Skipping Kali tools installation"
 fi
+
+# ---------------------------------------------------------------------------
+# upgrade-to-kali helper (Debian 12+ only)
+# Installs, but never auto-runs, a converter that rebases Debian onto Kali.
+# The user invokes it deliberately with: sudo upgrade-to-kali
+# ---------------------------------------------------------------------------
+install_upgrade_to_kali() {
+    # Gate: not already Kali, Debian-proper (not Ubuntu), VERSION_ID >= 12
+    # (empty VERSION_ID = testing/sid, treated as newer).
+    is_kali_linux && return 0
+    is_ubuntu && return 0
+    # Read ID/VERSION_ID via the same sourcing idiom the rest of this script
+    # uses (is_ubuntu, the Docker/PowerShell blocks); declaring them local keeps
+    # os-release's assignments out of the global scope.
+    local ID VERSION_ID major
+    . /etc/os-release 2>/dev/null || true
+    [ "$ID" = "debian" ] || return 0
+    if [ -n "$VERSION_ID" ]; then
+        major="${VERSION_ID%%.*}"
+        if [[ "$major" =~ ^[0-9]+$ ]] && [ "$major" -lt 12 ]; then
+            return 0
+        fi
+    fi
+
+    local dest="/usr/local/bin/upgrade-to-kali" tmp
+    tmp=$(mktemp)
+    cat > "$tmp" << 'UPGRADE_TO_KALI_EOF'
+#!/bin/bash
+# upgrade-to-kali - Convert a Debian 12+ (bookworm or newer) system into Kali Linux.
+# Installed by linux-setup.sh. Run: sudo upgrade-to-kali
+#
+# WARNING: performs an effectively irreversible base-system rebase onto
+# kali-rolling. Snapshot / back up first.
+#   https://www.kali.org/docs/general-use/kali-apt-sources/
+set -eo pipefail
+
+# Deterministic English command output regardless of host locale (os-release /
+# apt strings are parsed). C.UTF-8 is built into glibc (no locale-gen needed).
+export LC_ALL=C.UTF-8
+export LANG=C.UTF-8
+
+VERSION="1.0.0"
+
+# Overridable paths: production defaults; overridden only by tests.
+OS_RELEASE_FILE="${OS_RELEASE_FILE:-/etc/os-release}"
+APT_DIR="${APT_DIR:-/etc/apt}"
+KEYRING_PATH="${KEYRING_PATH:-/usr/share/keyrings/kali-archive-keyring.gpg}"
+KEYRING_URL="${KEYRING_URL:-https://archive.kali.org/archive-keyring.gpg}"
+KALI_MIRROR="${KALI_MIRROR:-http://http.kali.org/kali}"
+# Empty means auto-select at conversion time: kali-linux-default when a desktop
+# is present, else kali-linux-headless. Set the env var to force a choice.
+KALI_METAPACKAGE="${KALI_METAPACKAGE:-}"
+ASSUME_YES=false
+
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+    C_RED='\033[0;31m'; C_GREEN='\033[0;32m'; C_YELLOW='\033[1;33m'
+    C_BLUE='\033[0;34m'; C_NC='\033[0m'
+else
+    C_RED=''; C_GREEN=''; C_YELLOW=''; C_BLUE=''; C_NC=''
+fi
+log()  { printf '%b\n' "${C_BLUE}[*]${C_NC} $*"; }
+ok()   { printf '%b\n' "${C_GREEN}[+]${C_NC} $*"; }
+warn() { printf '%b\n' "${C_YELLOW}[!]${C_NC} $*" >&2; }
+err()  { printf '%b\n' "${C_RED}[x]${C_NC} $*" >&2; exit 1; }
+
+usage() {
+    cat << USAGE
+upgrade-to-kali v${VERSION}
+Convert a Debian 12+ (bookworm or newer) system into Kali Linux.
+
+Usage: sudo upgrade-to-kali [OPTIONS]
+
+Options:
+  -y, --yes, --force   Skip the confirmation prompt (non-interactive).
+  -h, --help           Show this help and exit.
+
+This adds the Kali repository, DISABLES the Debian sources, runs a full
+system upgrade against kali-rolling, and installs a Kali metapackage
+(kali-linux-default when a desktop is present, else kali-linux-headless).
+The base-system rebase is effectively irreversible - snapshot/back up first.
+USAGE
+}
+
+parse_args() {
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -y|--yes|--force) ASSUME_YES=true ;;
+            -h|--help) usage; exit 0 ;;
+            *) usage; err "Unknown option: $1" ;;
+        esac
+        shift
+    done
+}
+
+# Read KEY from an os-release-format file, stripping surrounding quotes.
+osr() {
+    [ -r "$OS_RELEASE_FILE" ] || return 1
+    local l
+    l=$(grep -E "^$1=" "$OS_RELEASE_FILE" 2>/dev/null | head -1) || return 1
+    l="${l#*=}"; l="${l%\"}"; l="${l#\"}"
+    printf '%s' "$l"
+}
+
+check_already_kali() {
+    if [ "$(osr ID || true)" = "kali" ]; then
+        ok "System already reports as Kali Linux ($(osr PRETTY_NAME || true)). Nothing to do."
+        exit 0
+    fi
+}
+
+check_supported_distro() {
+    local id id_like ver major
+    id="$(osr ID || true)"
+    id_like="$(osr ID_LIKE || true)"
+    ver="$(osr VERSION_ID || true)"
+    if [ "$id" != "debian" ] && ! printf '%s' "$id_like" | grep -qw debian; then
+        err "This tool only supports Debian (detected ID='$id' ID_LIKE='$id_like')."
+    fi
+    if [ "$id" = "ubuntu" ] || printf '%s' "$id_like" | grep -qw ubuntu; then
+        err "Ubuntu is not supported. Kali requires a Debian base."
+    fi
+    major="${ver%%.*}"
+    if [[ "$major" =~ ^[0-9]+$ ]]; then
+        if [ "$major" -lt 12 ]; then
+            err "Debian $ver detected; this tool requires Debian 12 (bookworm) or newer."
+        elif [ "$major" -eq 12 ]; then
+            warn "Debian 12 (bookworm) detected: rebasing to kali-rolling skips a Debian"
+            warn "release, so it is a larger jump than from 13. Back up first and expect a longer run."
+        fi
+    fi
+}
+
+confirm() {
+    $ASSUME_YES && return 0
+    warn "This will REBASE this system onto Kali Linux (kali-rolling)."
+    warn "It disables the Debian repositories and upgrades every base package."
+    warn "This is effectively IRREVERSIBLE. Make a snapshot/backup first."
+    printf 'Type YES to proceed: '
+    local r; read -r r
+    [ "$r" = "YES" ] || err "Aborted by user."
+}
+
+require_root() {
+    if [ "$(id -u)" -ne 0 ]; then
+        log "Elevating privileges with sudo..."
+        exec sudo bash "$0" --yes "$@"
+    fi
+}
+
+# Non-interactive apt-get: lock-wait + safe conffile handling.
+apt_ni() {
+    DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get \
+        -o DPkg::Lock::Timeout=300 \
+        -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold \
+        "$@"
+}
+
+backup_file() {
+    local f="$1"
+    [ -f "$f" ] || return 0
+    cp -a "$f" "${f}.backup.$(date +'%Y-%m-%d_%H-%M-%S')"
+}
+
+install_keyring() {
+    log "Installing Kali archive keyring -> $KEYRING_PATH"
+    local tmp; tmp=$(mktemp)
+    if ! wget -qO "$tmp" "$KEYRING_URL"; then
+        rm -f "$tmp"; err "Failed to download Kali keyring from $KEYRING_URL"
+    fi
+    install -o root -g root -m 644 "$tmp" "$KEYRING_PATH"
+    rm -f "$tmp"
+}
+
+write_kali_sources() {
+    local dest="$APT_DIR/sources.list.d/kali.sources"
+    mkdir -p "$APT_DIR/sources.list.d"
+    cat > "$dest" << SRC
+# Kali Linux repository (added by upgrade-to-kali)
+# https://www.kali.org/docs/general-use/kali-apt-sources/
+Types: deb
+URIs: ${KALI_MIRROR}
+Suites: kali-rolling
+Components: main contrib non-free non-free-firmware
+Signed-By: ${KEYRING_PATH}
+SRC
+    log "Wrote Kali repository -> $dest"
+}
+
+disable_debian_sources() {
+    local deb822="$APT_DIR/sources.list.d/debian.sources"
+    if [ -f "$deb822" ]; then
+        backup_file "$deb822"
+        mv "$deb822" "${deb822}.disabled-by-upgrade-to-kali"
+        log "Disabled $deb822"
+    fi
+    local legacy="$APT_DIR/sources.list"
+    if [ -f "$legacy" ] && grep -qE '^[[:space:]]*deb(-src)?[[:space:]]' "$legacy"; then
+        backup_file "$legacy"
+        sed -ri 's/^([[:space:]]*)(deb(-src)?[[:space:]])/\1#\2/' "$legacy"
+        log "Commented out Debian entries in $legacy"
+    fi
+    local other
+    other=$(find "$APT_DIR/sources.list.d" -maxdepth 1 -type f \
+        \( -name '*.list' -o -name '*.sources' \) ! -name 'kali.sources' 2>/dev/null || true)
+    if [ -n "$other" ]; then
+        warn "Other repository files remain enabled (left untouched):"
+        printf '%s\n' "$other" | sed 's/^/      /' >&2
+        warn "Remove/disable them if apt later reports version conflicts."
+    fi
+}
+
+# True when a graphical desktop is present (based on linux-setup's own
+# has_desktop_environment, plus MATE/Cinnamon); picks kali-linux-default over -headless.
+has_desktop() {
+    if [ -d /usr/share/xsessions ] && [ -n "$(ls -A /usr/share/xsessions 2>/dev/null)" ]; then return 0; fi
+    if [ -d /usr/share/wayland-sessions ] && [ -n "$(ls -A /usr/share/wayland-sessions 2>/dev/null)" ]; then return 0; fi
+    if [ -s /etc/X11/default-display-manager ]; then return 0; fi
+    if dpkg -l 2>/dev/null | grep -qE '^ii[[:space:]]+(xfce4|gnome-shell|kde-plasma-desktop|plasma-desktop|lxde-core|mate-desktop-environment|cinnamon)'; then return 0; fi
+    return 1
+}
+
+do_conversion() {
+    if [ -z "$KALI_METAPACKAGE" ]; then
+        if has_desktop; then KALI_METAPACKAGE=kali-linux-default; else KALI_METAPACKAGE=kali-linux-headless; fi
+    fi
+    log "Target Kali metapackage: $KALI_METAPACKAGE"
+    log "Refreshing package lists and installing prerequisites"
+    apt_ni update
+    apt_ni install -y wget ca-certificates gnupg
+    install_keyring
+    write_kali_sources
+    disable_debian_sources
+    log "Updating package lists from Kali"
+    apt_ni update
+    log "Rebasing base system onto kali-rolling (this can take a while)..."
+    apt_ni -y full-upgrade
+    log "Installing kali-archive-keyring and ${KALI_METAPACKAGE}"
+    apt_ni install -y kali-archive-keyring "$KALI_METAPACKAGE"
+    log "Removing packages that are no longer required"
+    apt_ni -y autoremove --purge
+    ok "Conversion complete. New system identity:"
+    grep -E '^(PRETTY_NAME|ID|VERSION)=' "$OS_RELEASE_FILE" | sed 's/^/    /'
+    warn "A reboot is recommended: sudo reboot"
+}
+
+main() {
+    parse_args "$@"
+    check_already_kali
+    check_supported_distro
+    confirm
+    require_root "$@"
+    do_conversion
+}
+
+# Run main only when executed, not when sourced (enables unit testing).
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+    main "$@"
+fi
+UPGRADE_TO_KALI_EOF
+
+    if [ -f "$dest" ] && cmp -s "$tmp" "$dest"; then
+        rm -f "$tmp"
+        log "upgrade-to-kali already up to date at $dest"
+        return 0
+    fi
+    backup_file --sudo "$dest"
+    sudo install -m 0755 "$tmp" "$dest"
+    rm -f "$tmp"
+    log "Installed upgrade-to-kali -> $dest (run: sudo upgrade-to-kali)"
+}
+install_upgrade_to_kali
 
 # Install and configure ufw-docker
 log "Installing ufw-docker..."
