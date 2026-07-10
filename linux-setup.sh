@@ -12,12 +12,18 @@ set -eo pipefail
 export LC_ALL=C.UTF-8
 export LANG=C.UTF-8
 
-VERSION="2.16.0"
+VERSION="2.17.0"
 FORCE_MODE=false
 NO_MODE=false
 NO_HACKING_TOOLS=false
 HARDEN_ONLY=false
 NO_KEYBOARD_LAYOUT=false
+
+# Go module supply-chain policy - single source for the persistent exports in
+# ~/.profile (apply_supply_chain_hardening) and the in-process exports in
+# install_go_tool (needed because ~/.profile doesn't affect the running script).
+GOPROXY_HARDENED="https://proxy.golang.org,off"
+GOSUMDB_HARDENED="sum.golang.org"
 
 # Colors for output (suppressed when not a TTY or when NO_COLOR is set)
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
@@ -142,7 +148,7 @@ error() {
 # is optional and the embedded .zshrc guards each one at runtime.
 FAILED_BUILDS=()
 note_build_failure() {
-    warn "$1 failed to install (continuing without it) - the shell config guards its absence"
+    warn "$1 failed to install (continuing without it)"
     FAILED_BUILDS+=("$1")
 }
 
@@ -170,22 +176,53 @@ backup_file() {
 
 # Write a config file from stdin, only when its content differs from what is
 # already there; back up the previous version first. Unchanged files are left
-# untouched so re-runs cause no backup churn.
-# Usage: write_config_file [--sudo] [--mode <octal>] <dest> << 'EOF' ... EOF
+# untouched so re-runs cause no backup churn. Sets the global CONFIG_CHANGED
+# (true|false, valid until the next call) so callers can gate follow-up actions
+# like service restarts on an actual change.
+# Usage: write_config_file [--sudo] [--mode <octal>] [--keep-existing] <dest> << 'EOF' ... EOF
+#   --keep-existing: never touch an existing dest (create-only semantics)
 write_config_file() {
-    local sudo_cmd="" mode="644"
-    if [ "$1" = "--sudo" ]; then sudo_cmd="sudo"; shift; fi
-    if [ "$1" = "--mode" ]; then mode="$2"; shift 2; fi
+    local sudo_cmd="" mode="644" keep_existing=false
+    while :; do
+        case "$1" in
+            --sudo) sudo_cmd="sudo"; shift ;;
+            --mode) mode="$2"; shift 2 ;;
+            --keep-existing) keep_existing=true; shift ;;
+            *) break ;;
+        esac
+    done
     local dest="$1" tmp
+    CONFIG_CHANGED=false
     tmp=$(mktemp)
     cat > "$tmp"    # heredoc stdin into a real file (never install /dev/stdin)
-    if [ -f "$dest" ] && cmp -s "$tmp" "$dest"; then
+    if [ -f "$dest" ] && { [ "$keep_existing" = true ] || cmp -s "$tmp" "$dest"; }; then
         rm -f "$tmp"
         return 0
     fi
     backup_file ${sudo_cmd:+--sudo} "$dest"
     $sudo_cmd install -m "$mode" "$tmp" "$dest"
     rm -f "$tmp"
+    CONFIG_CHANGED=true
+}
+
+# Install a rendered user config from a temp file, with overwrite prompting:
+# identical content -> kept silently (no prompt, no backup churn); differing
+# content -> prompt (per-caller default), then delegate to write_config_file,
+# which owns the backup + install mechanics and sets CONFIG_CHANGED. Consumes
+# (removes) the temp file and always returns 0, so call sites are 'set -e'-safe.
+# Usage: install_user_config <src_tmp> <dest> <prompt> <default Y|N>
+install_user_config() {
+    local src="$1" dest="$2" prompt="$3" default="$4"
+    if [ -f "$dest" ] && cmp -s "$src" "$dest"; then
+        log "$dest is already up to date"
+        CONFIG_CHANGED=false
+    elif [ -f "$dest" ] && ! prompt_yes_no "$prompt" "$default"; then
+        log "Keeping existing $dest"
+        CONFIG_CHANGED=false
+    else
+        write_config_file "$dest" < "$src"
+    fi
+    rm -f "$src"
 }
 
 # apt-get wrapper: in force/no mode run fully non-interactively so debconf
@@ -204,13 +241,45 @@ apt_get() {
     fi
 }
 
+# curl wrapper owning the download policy for every fetch in this script:
+# HTTPS-only, TLS >= 1.2, fail on HTTP errors, bounded timeouts so an
+# unreachable host can't stall the run. Callers append extra flags
+# (e.g. -o <file>); later flags override these defaults.
+fetch_url() {
+    curl --proto '=https' --tlsv1.2 --connect-timeout 10 --max-time 300 -fsSL "$@"
+}
+
 # True when the vendor publishes an apt suite at <base_url>/dists/<suite>/Release.
 # Used to pick a repo suite by capability instead of maintaining codename lists
-# (Docker and PowerShell repos); bounded timeouts so an unreachable mirror
-# can't stall the run.
+# (Docker and PowerShell repos); tighter timeouts than fetch_url's defaults
+# because a probe should fail fast.
 repo_suite_published() {
-    curl --proto '=https' --tlsv1.2 --connect-timeout 5 --max-time 15 -fsI \
-        "$1/dists/$2/Release" > /dev/null 2>&1
+    fetch_url --connect-timeout 5 --max-time 15 -I "$1/dists/$2/Release" > /dev/null 2>&1
+}
+
+# Download <url> to a mktemp file, then install it atomically at <dest>, so a
+# truncated download can never land at the destination (or satisfy a
+# command -v re-run gate with a broken file). Returns the fetch status, so
+# each caller keeps its own fatal/warn policy.
+# Usage: fetch_install [--sudo] [--mode <octal>] <url> <dest>
+fetch_install() {
+    local sudo_cmd="" mode="644"
+    while :; do
+        case "$1" in
+            --sudo) sudo_cmd="sudo"; shift ;;
+            --mode) mode="$2"; shift 2 ;;
+            *) break ;;
+        esac
+    done
+    local url="$1" dest="$2" tmp rc=0
+    tmp=$(mktemp)
+    if fetch_url -o "$tmp" "$url"; then
+        $sudo_cmd install -m "$mode" "$tmp" "$dest"
+    else
+        rc=1
+    fi
+    rm -f "$tmp"
+    return $rc
 }
 
 # Prompt user with yes/no question
@@ -253,11 +322,17 @@ is_kali_linux() {
     grep -q "Kali" /etc/os-release 2>/dev/null
 }
 
+# True when Kali pentest tooling should be installed (on Kali, not opted out).
+want_hacking_tools() {
+    is_kali_linux && [ "$NO_HACKING_TOOLS" != true ]
+}
+
 # Check if we're on Ubuntu or Ubuntu-based distribution
 is_ubuntu() {
+    local ID ID_LIKE
     if [ -f /etc/os-release ]; then
         . /etc/os-release
-        [ "$ID" = "ubuntu" ] || [ "$ID_LIKE" = "ubuntu" ] || echo "$ID_LIKE" | grep -q "ubuntu"
+        [ "$ID" = "ubuntu" ] || [[ "$ID_LIKE" == *ubuntu* ]]
     else
         return 1
     fi
@@ -288,6 +363,14 @@ update_profile_export() {
     escaped_value="${escaped_value//\$/\\\$}"    # $ -> \$
     escaped_value="${escaped_value//\`/\\\`}"    # ` -> \`
 
+    # Composed once so the fast-path check and the writers stay in lockstep
+    local export_line="export ${var_name}=\"${escaped_value}\""
+
+    # No-op fast path: the exact export line is already present
+    if grep -qxF "$export_line" "$profile_file" 2>/dev/null; then
+        return 0
+    fi
+
     # For sed replacement, also escape & (special in replacement string)
     local sed_value="$escaped_value"
     sed_value="${sed_value//&/\\&}"              # & -> \&
@@ -297,7 +380,7 @@ update_profile_export() {
         sed -i "s|^export ${var_name}=.*|export ${var_name}=\"${sed_value}\"|" "$profile_file"
     else
         # Append new export
-        echo "export ${var_name}=\"${escaped_value}\"" >> "$profile_file"
+        echo "$export_line" >> "$profile_file"
     fi
 }
 
@@ -325,6 +408,38 @@ ensure_zprofile_sources_profile() {
     fi
 }
 
+# Hardening config bodies - each defined once and deployed to both the
+# user-level and system-level (defence-in-depth) locations by
+# apply_supply_chain_hardening, so the two copies cannot drift.
+emit_npmrc() {
+    cat << 'EOF'
+ignore-scripts=true
+save-exact=true
+audit=true
+fund=false
+min-release-age=7
+minimum-release-age=10080
+EOF
+}
+
+emit_uv_toml() {
+    cat << 'EOF'
+exclude-newer = "1 week"
+system-certs = true
+python-preference = "system"
+EOF
+}
+
+emit_pip_conf() {
+    cat << 'EOF'
+[global]
+prefer-binary = true
+
+[install]
+prefer-binary = true
+EOF
+}
+
 # Apply all supply-chain hardening configurations
 # Writes package manager configs (user-level + system-level fallbacks),
 # telemetry opt-outs, and Go module hardening environment variables.
@@ -339,14 +454,9 @@ apply_supply_chain_hardening() {
     # pnpm reads `minimum-release-age` (same ~/.npmrc) in MINUTES. 7 days ==
     # 10080 minutes; both match the uv/bun 7-day cooldown.
     log "Configuring npm security hardening..."
-    write_config_file "$HOME/.npmrc" << 'EOF'
-ignore-scripts=true
-save-exact=true
-audit=true
-fund=false
-min-release-age=7
-minimum-release-age=10080
-EOF
+    # Process substitution, not a pipe: a pipe would run write_config_file in a
+    # subshell and silently discard the CONFIG_CHANGED global it sets.
+    write_config_file "$HOME/.npmrc" < <(emit_npmrc)
 
     # --- Bun hardening (user-level) ---
     log "Configuring Bun security hardening..."
@@ -360,30 +470,17 @@ EOF
     # --- Cargo hardening (user-level, preserve existing) ---
     log "Configuring Cargo security hardening..."
     mkdir -p "$HOME/.cargo"
-    if [ ! -f "$HOME/.cargo/config.toml" ]; then
-        cat > "$HOME/.cargo/config.toml" << 'EOF'
+    write_config_file --keep-existing "$HOME/.cargo/config.toml" << 'EOF'
 [net]
 git-fetch-with-cli = true
 EOF
-    fi
 
     # --- Python package manager hardening (user-level) ---
     log "Configuring Python package manager hardening..."
     mkdir -p "$HOME/.config/uv" "$HOME/.config/pip"
 
-    write_config_file "$HOME/.config/uv/uv.toml" << 'EOF'
-exclude-newer = "1 week"
-system-certs = true
-python-preference = "system"
-EOF
-
-    write_config_file "$HOME/.config/pip/pip.conf" << 'EOF'
-[global]
-prefer-binary = true
-
-[install]
-prefer-binary = true
-EOF
+    write_config_file "$HOME/.config/uv/uv.toml" < <(emit_uv_toml)
+    write_config_file "$HOME/.config/pip/pip.conf" < <(emit_pip_conf)
 
     # --- System-level fallback configs (defence-in-depth) ---
     # If user deletes their dotfiles, system defaults still enforce hardening
@@ -391,28 +488,9 @@ EOF
     if sudo -n true 2>/dev/null; then
         sudo mkdir -p /usr/local/etc /etc/uv
 
-        write_config_file --sudo /usr/local/etc/npmrc << 'EOF'
-ignore-scripts=true
-save-exact=true
-audit=true
-fund=false
-min-release-age=7
-minimum-release-age=10080
-EOF
-
-        write_config_file --sudo /etc/uv/uv.toml << 'EOF'
-exclude-newer = "1 week"
-system-certs = true
-python-preference = "system"
-EOF
-
-        write_config_file --sudo /etc/pip.conf << 'EOF'
-[global]
-prefer-binary = true
-
-[install]
-prefer-binary = true
-EOF
+        write_config_file --sudo /usr/local/etc/npmrc < <(emit_npmrc)
+        write_config_file --sudo /etc/uv/uv.toml < <(emit_uv_toml)
+        write_config_file --sudo /etc/pip.conf < <(emit_pip_conf)
 
         log "System-level fallback configs deployed"
     else
@@ -437,8 +515,8 @@ EOF
     update_profile_export "HF_HUB_DISABLE_TELEMETRY" "1"
 
     # Go module supply-chain hardening
-    update_profile_export "GOPROXY" "https://proxy.golang.org,off"
-    update_profile_export "GOSUMDB" "sum.golang.org"
+    update_profile_export "GOPROXY" "$GOPROXY_HARDENED"
+    update_profile_export "GOSUMDB" "$GOSUMDB_HARDENED"
 
     # Go telemetry opt-out (Go 1.23+ writes mode to ~/.config/go/telemetry/mode)
     command -v go &>/dev/null && go telemetry off 2>/dev/null || true
@@ -449,29 +527,28 @@ EOF
     log "Supply-chain hardening complete"
 }
 
-# Check if desktop environment is available
+# Check if desktop environment is available. The probe result is cached in the
+# global HAS_DESKTOP (yes|no) after the first call (same pattern as
+# TERMINAL_BG): the check runs many times per run, and on headless systems it
+# falls through to a dpkg scan of the whole package database every time.
+HAS_DESKTOP=""
 has_desktop_environment() {
-    # Check for desktop session files (most reliable)
-    if [ -d /usr/share/xsessions ] && [ -n "$(ls -A /usr/share/xsessions 2>/dev/null)" ]; then
-        return 0
+    if [ -z "$HAS_DESKTOP" ]; then
+        HAS_DESKTOP=no
+        # Desktop session files (most reliable), then display manager config,
+        # then common DE packages (Kali uses XFCE). Keep the package list in
+        # sync with has_desktop in the upgrade-to-kali heredoc.
+        if [ -d /usr/share/xsessions ] && [ -n "$(ls -A /usr/share/xsessions 2>/dev/null)" ]; then
+            HAS_DESKTOP=yes
+        elif [ -d /usr/share/wayland-sessions ] && [ -n "$(ls -A /usr/share/wayland-sessions 2>/dev/null)" ]; then
+            HAS_DESKTOP=yes
+        elif [ -s /etc/X11/default-display-manager ]; then
+            HAS_DESKTOP=yes
+        elif dpkg -l 2>/dev/null | grep -qE '^ii\s+(xfce4|gnome-shell|kde-plasma-desktop|plasma-desktop|lxde-core|mate-desktop-environment|cinnamon)'; then
+            HAS_DESKTOP=yes
+        fi
     fi
-
-    if [ -d /usr/share/wayland-sessions ] && [ -n "$(ls -A /usr/share/wayland-sessions 2>/dev/null)" ]; then
-        return 0
-    fi
-
-    # Check for display manager configuration
-    if [ -f /etc/X11/default-display-manager ] && [ -s /etc/X11/default-display-manager ]; then
-        return 0
-    fi
-
-    # Check for common DE packages (Kali uses XFCE). Keep the list in sync
-    # with has_desktop in the upgrade-to-kali heredoc.
-    if dpkg -l 2>/dev/null | grep -qE '^ii\s+(xfce4|gnome-shell|kde-plasma-desktop|plasma-desktop|lxde-core|mate-desktop-environment|cinnamon)'; then
-        return 0
-    fi
-
-    return 1
+    [ "$HAS_DESKTOP" = "yes" ]
 }
 
 # Detect the terminal background, storing the result (dark|light|unknown) in the
@@ -547,18 +624,20 @@ is_light_terminal() {
 # Convert version string to comparable number: "1.85" -> 185, "" -> 0
 version_to_num() {
     local v="${1:-0.0}"
-    [ -z "$v" ] && v="0.0"
     echo "$v" | awk -F. '{print ($1 * 100) + $2}'
 }
 
-# Get installed Go version as comparable number (e.g., 1.24 -> 124, missing -> 0)
+# Get installed Go version as comparable number (e.g., 1.24 -> 124, missing ->
+# 0). Memoized in GO_VER_NUM - it's an invariant per run (the Go toolchain is
+# installed in Phase 1, before any caller) and each probe costs a pipeline.
+GO_VER_NUM=""
 get_go_version() {
-    if ! command -v go &> /dev/null; then
-        echo "0"
-        return
+    if [ -z "$GO_VER_NUM" ]; then
+        local go_version
+        go_version=$(go version 2>/dev/null | grep -oP 'go\K[0-9]+\.[0-9]+' | head -1 || true)
+        GO_VER_NUM=$(version_to_num "$go_version")
     fi
-    local go_version=$(go version 2>/dev/null | grep -oP 'go\K[0-9]+\.[0-9]+' | head -1 || true)
-    version_to_num "$go_version"
+    echo "$GO_VER_NUM"
 }
 
 # Per-tool minimum apt versions (compared via version_to_num, e.g. "0.9" -> 9).
@@ -569,6 +648,8 @@ DELTA_MIN=16      # delta  >= 0.16 (Ubuntu 24.04 LTS ships 0.16.5)
 LAZYGIT_MIN=50    # lazygit>= 0.50 (Debian 13 / Kali have it; older -> go install)
 YQ_MIN=400        # yq-go  >= 4.0  (mikefarah yq; Kali/sid ship 4.53)
 PWSH_MIN=700      # powershell >= 7.0 (Kali ships 7.5.x natively; else Microsoft repo)
+RUSTC_MIN=185     # rustc  >= 1.85 (dev-runtime minimum for modern tools; else rustup)
+GO_MIN=124        # go     >= 1.24 (needed to build the source-built Go tools)
 
 # apt candidate version of a package as a comparable number (0 if not in archive)
 apt_candidate_version_num() {
@@ -591,16 +672,27 @@ apt_available() { [ "$(apt_candidate_version_num "$1")" -gt 0 ]; }
 remove_source_builds() { rm -f "$HOME/go/bin/$1" "$HOME/.cargo/bin/$1" 2>/dev/null || true; }
 
 # Install Go tool
-# Usage: install_go_tool <tool-name> <go-package-path> [mode]
-#   mode: "update" (default) rebuilds @latest every run.
-#         "once" skips the build when <tool-name> is already on PATH - use for
-#         discontinued/archived upstreams we want to freeze at the installed build
-#         (also avoids pulling @latest from a dormant, hijackable namespace).
+# Usage: install_go_tool <tool-name> <go-package-path> [mode] [min_go]
+#   mode:   "update" (default) rebuilds @latest every run.
+#           "once" skips the build when <tool-name> is already on PATH - use for
+#           discontinued/archived upstreams we want to freeze at the installed build
+#           (also avoids pulling @latest from a dormant, hijackable namespace).
+#   min_go: minimum get_go_version needed to build (0 = no requirement); the
+#           tool is skipped with a warning when the installed Go is older.
 install_go_tool() {
     local tool_name="$1"
     local package_path="$2"
     local mode="${3:-update}"
+    local min_go="${4:-0}"
 
+    if [ "$min_go" -gt 0 ]; then
+        local go_num
+        go_num=$(get_go_version)
+        if [ "$go_num" -lt "$min_go" ]; then
+            warn "Skipping ${tool_name} - requires Go >= $((min_go / 100)).$((min_go % 100)), found $((go_num / 100)).$((go_num % 100))"
+            return 0
+        fi
+    fi
     if command -v "$tool_name" &> /dev/null; then
         if [ "$mode" = "once" ]; then
             log "${tool_name} already installed - skipping update (install-once)"
@@ -611,8 +703,8 @@ install_go_tool() {
         log "Installing ${tool_name}..."
     fi
     export PATH=$HOME/go/bin:$PATH
-    export GOPROXY="https://proxy.golang.org,off"
-    export GOSUMDB="sum.golang.org"
+    export GOPROXY="$GOPROXY_HARDENED"
+    export GOSUMDB="$GOSUMDB_HARDENED"
     # Non-fatal: a failed build (e.g. OOM on a low-RAM VM) is recorded and the run
     # continues instead of aborting ('||' keeps 'set -e' from firing at the call site).
     go install -v "$package_path" || note_build_failure "$tool_name"
@@ -645,16 +737,23 @@ install_apt_only() {
 }
 
 # Install the Microsoft package-signing keys (shared by the VS Code and PowerShell
-# repos). Always rebuilt, never cached: Microsoft rotates signing keys
-# (microsoft.asc signs pre-2025 repos like repos/code, microsoft-rolling.asc
-# carries the current and future keys), so a stale keyring breaks apt-get update.
+# repos). Rebuilt on every run, never cached across runs: Microsoft rotates
+# signing keys (microsoft.asc signs pre-2025 repos like repos/code,
+# microsoft-rolling.asc carries the current and future keys), so a stale keyring
+# breaks apt-get update. Within one run the first refresh suffices, so repeat
+# calls (re-run refresh, VS Code block, PowerShell block) return early.
+MS_KEYRING_REFRESHED=false
 ensure_microsoft_keyring() {
+    [ "$MS_KEYRING_REFRESHED" = true ] && return 0
     command -v gpg &> /dev/null || apt_get install -y gpg
-    curl --proto '=https' --tlsv1.2 -fsSL \
+    local tmp_keyring
+    tmp_keyring=$(mktemp)
+    fetch_url \
         https://packages.microsoft.com/keys/microsoft.asc \
-        https://packages.microsoft.com/keys/microsoft-rolling.asc | gpg --dearmor > /tmp/microsoft.gpg
-    sudo install -m 644 /tmp/microsoft.gpg /usr/share/keyrings/microsoft.gpg
-    rm -f /tmp/microsoft.gpg
+        https://packages.microsoft.com/keys/microsoft-rolling.asc | gpg --dearmor > "$tmp_keyring"
+    sudo install -m 644 "$tmp_keyring" /usr/share/keyrings/microsoft.gpg
+    rm -f "$tmp_keyring"
+    MS_KEYRING_REFRESHED=true
 }
 
 # Write the Microsoft prod repo apt sources for the given release path/suite.
@@ -682,7 +781,7 @@ write_docker_sources() {
 #   apt_bin: the executable the apt package installs, if it differs from <bin>
 #            (e.g. the 'yq-go' package installs 'yq-go'); a /usr/local/bin/<bin>
 #            symlink is created so <bin> resolves to it.
-#   min_go:  minimum get_go_version needed to build from source in the fallback.
+#   min_go:  forwarded to install_go_tool's min-Go gate in the source-build fallback.
 install_go_tool_apt() {
     local bin="$1"
     local apt_pkg="$2"
@@ -700,10 +799,8 @@ install_go_tool_apt() {
             sudo ln -sf "$(command -v "$apt_bin")" "/usr/local/bin/${bin}"
         fi
         remove_source_builds "$bin"   # drop stale ~/go/bin copy so apt wins on PATH
-    elif [ "$(get_go_version)" -ge "$min_go" ]; then
-        install_go_tool "$bin" "$go_pkg"
     else
-        warn "${bin}: no recent apt package and Go too old to build - skipping"
+        install_go_tool "$bin" "$go_pkg" update "$min_go"
     fi
 }
 
@@ -742,10 +839,16 @@ install_cargo_tool() {
 install_rust_via_rustup() {
     log "Installing Rust via rustup (official Rust installer)..."
 
-    # Download and run rustup-init. RUSTUP_INIT_SKIP_PATH_CHECK silences the
-    # "existing Rust at /usr/bin" warning when apt's rustc is also installed —
-    # ~/.cargo/bin is prepended to PATH in .zshrc so rustup's toolchain wins.
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | RUSTUP_INIT_SKIP_PATH_CHECK=yes sh -s -- -y --default-toolchain stable
+    # Download and run rustup-init - fetched to a file first so a truncated
+    # transfer can't execute (same idiom as the zoxide installer below).
+    # RUSTUP_INIT_SKIP_PATH_CHECK silences the "existing Rust at /usr/bin"
+    # warning when apt's rustc is also installed — ~/.cargo/bin is prepended
+    # to PATH in .zshrc so rustup's toolchain wins.
+    local rustup_init
+    rustup_init=$(mktemp)
+    fetch_url -o "$rustup_init" https://sh.rustup.rs
+    RUSTUP_INIT_SKIP_PATH_CHECK=yes sh "$rustup_init" -y --default-toolchain stable
+    rm -f "$rustup_init"
 
     # Source cargo environment for this script
     export CARGO_HOME="$HOME/.cargo"
@@ -856,36 +959,29 @@ apt_get install -y \
     zsh-autosuggestions \
     zsh-syntax-highlighting
 
-# Install Rust - either from repo (if >= 1.85) or via rustup. Rust is always
-# installed as a dev runtime; sd/delta still prefer apt when it ships a
+# Install Rust - either from repo (if >= RUSTC_MIN) or via rustup. Rust is
+# always installed as a dev runtime; sd/delta still prefer apt when it ships a
 # recent-enough build (see install_cargo_tool below) and only fall back to
 # compiling via cargo.
-log "Checking Rust version in repositories..."
-REPO_RUST_VERSION=$(apt-cache policy rustc 2>/dev/null | grep -oP 'Candidate:\s*\K[0-9]+\.[0-9]+' | head -1 || true)
-if [ -z "$REPO_RUST_VERSION" ]; then
-    REPO_RUST_VERSION="0.0"
-    warn "Could not determine repository Rust version"
-fi
-REPO_RUST_VERSION_NUM=$(version_to_num "$REPO_RUST_VERSION")
-MINIMUM_RUST_VERSION=185  # Rust 1.85 minimum for modern tools
-
-log "Repository has Rust version: $REPO_RUST_VERSION (numeric: $REPO_RUST_VERSION_NUM, minimum required: $MINIMUM_RUST_VERSION)"
-
-if ! command -v cargo &> /dev/null && [ "$REPO_RUST_VERSION_NUM" -ge "$MINIMUM_RUST_VERSION" ]; then
-    log "Installing Rust from repositories (version $REPO_RUST_VERSION)..."
-    apt_get install -y cargo rustc
-elif ! command -v cargo &> /dev/null; then
-    log "Repository version $REPO_RUST_VERSION is below required $MINIMUM_RUST_VERSION, installing Rust via rustup..."
-    install_rust_via_rustup
+if ! command -v cargo &> /dev/null; then
+    log "Checking Rust version in repositories..."
+    REPO_RUST_VERSION_NUM=$(apt_candidate_version_num rustc)
+    if [ "$REPO_RUST_VERSION_NUM" -ge "$RUSTC_MIN" ]; then
+        log "Installing Rust from repositories (candidate numeric: $REPO_RUST_VERSION_NUM, minimum: $RUSTC_MIN)..."
+        apt_get install -y cargo rustc
+    else
+        log "Repository Rust too old or absent (numeric: $REPO_RUST_VERSION_NUM, minimum: $RUSTC_MIN), installing via rustup..."
+        install_rust_via_rustup
+    fi
 elif command -v rustup &> /dev/null; then
     log "Updating Rust via rustup..."
     rustup update stable
 else
     INSTALLED_RUST_VERSION=$(rustc --version 2>/dev/null | grep -oP '[0-9]+\.[0-9]+' | head -1 || true)
     INSTALLED_RUST_VERSION_NUM=$(version_to_num "$INSTALLED_RUST_VERSION")
-    log "Installed Rust version: ${INSTALLED_RUST_VERSION:-unknown} (numeric: $INSTALLED_RUST_VERSION_NUM, minimum required: $MINIMUM_RUST_VERSION)"
-    if [ "$INSTALLED_RUST_VERSION_NUM" -lt "$MINIMUM_RUST_VERSION" ]; then
-        log "Installed Rust is below required $MINIMUM_RUST_VERSION, installing rustup for a newer toolchain..."
+    log "Installed Rust version: ${INSTALLED_RUST_VERSION:-unknown} (numeric: $INSTALLED_RUST_VERSION_NUM, minimum required: $RUSTC_MIN)"
+    if [ "$INSTALLED_RUST_VERSION_NUM" -lt "$RUSTC_MIN" ]; then
+        log "Installed Rust is below required $RUSTC_MIN, installing rustup for a newer toolchain..."
         install_rust_via_rustup
     else
         log "Rust is already installed (apt-managed, updated via dist-upgrade)"
@@ -895,7 +991,11 @@ fi
 # Install Bun (JavaScript/TypeScript runtime, package manager, drop-in Node.js replacement)
 log "Installing Bun..."
 if ! command -v bun &> /dev/null; then
-    curl --proto '=https' --tlsv1.2 -fsSL https://bun.com/install | bash
+    # Installer fetched to a file first so a truncated transfer can't execute.
+    BUN_INSTALLER=$(mktemp)
+    fetch_url -o "$BUN_INSTALLER" https://bun.com/install
+    bash "$BUN_INSTALLER"
+    rm -f "$BUN_INSTALLER"
 
     # Source bun environment for this script
     export BUN_INSTALL="$HOME/.bun"
@@ -1005,7 +1105,7 @@ else
 fi
 
 # Install Kali-specific package - only install on Kali Linux
-if is_kali_linux && [ "$NO_HACKING_TOOLS" != true ]; then
+if want_hacking_tools; then
     log "Installing hacking tools..."
     apt_get install -y massdns mitmproxy || true
 else
@@ -1013,13 +1113,7 @@ else
 fi
 
 # Install pipx (Python application installer)
-log "Installing pipx..."
-if ! command -v pipx &> /dev/null; then
-    #python3 -m pip install --user pipx
-    apt_get install -y pipx
-else
-    log "pipx is already installed"
-fi
+install_apt_package "pipx" "pipx"
 
 # Install uv (modern Python package installer)
 log "Installing uv..."
@@ -1072,10 +1166,10 @@ if ! command -v docker &> /dev/null; then
 
     log "Using Docker repository: $DOCKER_DISTRO/$DOCKER_CODENAME"
 
-    # Add Docker's official GPG key
+    # Add Docker's official GPG key (world-readable so apt can use it; a fetch
+    # failure stays fatal - Docker is a core install)
     sudo install -m 0755 -d /etc/apt/keyrings
-    sudo curl --proto '=https' --tlsv1.2 -fsSL https://download.docker.com/linux/$DOCKER_DISTRO/gpg -o /etc/apt/keyrings/docker.asc
-    sudo chmod a+r /etc/apt/keyrings/docker.asc
+    fetch_install --sudo --mode 644 "https://download.docker.com/linux/${DOCKER_DISTRO}/gpg" /etc/apt/keyrings/docker.asc
 
     # Add the repository to Apt sources
     write_docker_sources "$DOCKER_DISTRO" "$DOCKER_CODENAME"
@@ -1095,8 +1189,7 @@ if ! command -v docker &> /dev/null; then
     apt_get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
     # Enable and start Docker service
-    sudo systemctl enable docker || true
-    sudo systemctl start docker || true
+    sudo systemctl enable --now docker || true
 
     log "Docker CE installed and started successfully"
 else
@@ -1133,8 +1226,7 @@ Components: main
 Architectures: amd64,arm64,armhf
 Signed-By: /usr/share/keyrings/microsoft.gpg
 EOF
-        
-        apt_get install -y apt-transport-https
+
         apt_get update
         apt_get install -y code
     else
@@ -1249,19 +1341,10 @@ fi
 # Configure zsh with Kali Linux default baseline plus enhancements
 log "Configuring zsh..."
 
-# Check if .zshrc exists and prompt for overwrite
-OVERWRITE_ZSHRC=true
-if [ -f ~/.zshrc ]; then
-    if prompt_yes_no "Overwrite existing .zshrc (strongly recommended on first run!)?" "Y"; then
-        backup_file ~/.zshrc
-    else
-        OVERWRITE_ZSHRC=false
-        log "Keeping existing .zshrc"
-    fi
-fi
-
-if [ "$OVERWRITE_ZSHRC" = true ]; then
-cat > ~/.zshrc << 'EOF'
+# Render the full .zshrc to a temp file; install_user_config below compares it
+# against any existing ~/.zshrc and only prompts/backs up when content differs.
+ZSHRC_TMP=$(mktemp)
+cat > "$ZSHRC_TMP" << 'EOF'
 # Default ~/.zshrc from Kali Linux
 # ~/.zshrc file for zsh interactive shells.
 # see /usr/share/doc/zsh/examples/zshrc for examples
@@ -1516,22 +1599,29 @@ precmd() {
     fi
 }
 
+# Cache a tool's init output in a file and source it, so startup never forks
+# the tool itself: the generator command runs only when the cache is missing,
+# empty, or older than one of its deps (binary path, rc file - nonexistent
+# deps are ignored). $commands[x] gives a fork-free binary path for deps.
+# Used for dircolors, zoxide, and fzf below.
+# Usage: _cached_init <cache-file-name> <generator-cmd-string> <dep>...
+_cached_init() {
+  local cache="${XDG_CACHE_HOME:-$HOME/.cache}/$1" gen="$2" d regen=
+  shift 2
+  [[ -s $cache ]] || regen=1
+  for d in "$@"; do [[ -e $d && $d -nt $cache ]] && regen=1; done
+  if [[ -n $regen ]]; then
+    mkdir -p "${cache:h}"
+    eval "$gen" > "$cache"
+  fi
+  [[ -s $cache ]] && source "$cache"
+}
+
 # enable color support of ls, less and man, and also add handy aliases
 if [ -x /usr/bin/dircolors ]; then
-    # Cache dircolors output (like zoxide) to avoid forking dircolors on every
-    # startup. Regenerate when the dircolors binary or a custom ~/.dircolors is
-    # newer than the cache; $commands[dircolors] is a fork-free path lookup.
-    _dircolors_cache="${XDG_CACHE_HOME:-$HOME/.cache}/dircolors.zsh"
-    if [[ ! -s "$_dircolors_cache" || $commands[dircolors] -nt "$_dircolors_cache" || ( -r ~/.dircolors && ~/.dircolors -nt "$_dircolors_cache" ) ]]; then
-        mkdir -p "${_dircolors_cache%/*}"
-        if [[ -r ~/.dircolors ]]; then
-            dircolors -b ~/.dircolors
-        else
-            dircolors -b
-        fi > "$_dircolors_cache"
-    fi
-    source "$_dircolors_cache"
-    unset _dircolors_cache
+    # Cached dircolors output - regenerates only after a dircolors upgrade or
+    # when a custom ~/.dircolors changes; no dircolors fork on normal startups.
+    _cached_init dircolors.zsh 'if [[ -r ~/.dircolors ]]; then dircolors -b ~/.dircolors; else dircolors -b; fi' $commands[dircolors] ~/.dircolors
     export LS_COLORS="$LS_COLORS:ow=30;44:" # fix ls color for folders with 777 permissions
 
     alias ls='ls --color=auto'
@@ -1576,24 +1666,16 @@ fi
 setopt complete_in_word       # cd /ho/ka/Dow<TAB> expands to /home/kali/Downloads
 
 # zoxide - smarter cd command (interactive shells only, to avoid interfering with automation).
-# Cache the init script so we don't spawn `zoxide init` on every startup; $commands[zoxide] is
-# zsh's fork-free path lookup, so regenerate only when the binary is newer (e.g. after upgrade).
+# Init output cached via _cached_init - regenerates only after a zoxide upgrade.
 if (( $+commands[zoxide] )) && [[ -o interactive ]]; then
-    _zoxide_cache="${XDG_CACHE_HOME:-$HOME/.cache}/zoxide-init.zsh"
-    if [[ ! -s "$_zoxide_cache" || $commands[zoxide] -nt "$_zoxide_cache" ]]; then
-        mkdir -p "${_zoxide_cache%/*}"
-        zoxide init zsh --cmd cd > "$_zoxide_cache"
-    fi
-    source "$_zoxide_cache"
-    unset _zoxide_cache
+    _cached_init zoxide-init.zsh 'zoxide init zsh --cmd cd' $commands[zoxide]
 fi
 
 # fzf - fuzzy finder key bindings + completion (interactive shells only).
 # Ctrl-T inserts file paths, Alt-C cds into a subdir, **<Tab> triggers fuzzy
 # completion. Ctrl-R is left to the hstr block below (it runs after this one and
 # rebinds Ctrl-R when hstr is present); without hstr, fzf's own Ctrl-R stays.
-# Init output is cached like zoxide's so we don't fork fzf on every startup;
-# $commands[fzf] is the fork-free path lookup, so regenerate only after upgrade.
+# Init output cached via _cached_init - regenerates only after an fzf upgrade.
 if (( $+commands[fzf] )) && [[ -o interactive ]]; then
     if (( $+commands[fdfind] )); then
         export FZF_DEFAULT_COMMAND='fdfind --type f --hidden --strip-cwd-prefix --exclude .git'
@@ -1603,17 +1685,10 @@ if (( $+commands[fzf] )) && [[ -o interactive ]]; then
     (( $+commands[batcat] )) && export FZF_CTRL_T_OPTS='--preview "batcat --color=always --line-range :200 {}"'
     export FZF_ALT_C_OPTS='--preview "tree -C {} 2>/dev/null | head -200"'
 
-    _fzf_cache="${XDG_CACHE_HOME:-$HOME/.cache}/fzf-init.zsh"
-    if [[ ! -s "$_fzf_cache" || $commands[fzf] -nt "$_fzf_cache" ]]; then
-        mkdir -p "${_fzf_cache%/*}"
-        # fzf >= 0.48 embeds the scripts (fzf --zsh); older Debian/Kali packages
-        # ship them under /usr/share/doc instead. The '>' truncates the cache to
-        # empty first, so a total failure degrades to no key bindings, not an error.
-        fzf --zsh > "$_fzf_cache" 2>/dev/null \
-            || cp /usr/share/doc/fzf/examples/key-bindings.zsh "$_fzf_cache" 2>/dev/null
-    fi
-    source "$_fzf_cache"
-    unset _fzf_cache
+    # fzf >= 0.48 embeds the scripts (fzf --zsh); older Debian/Kali packages
+    # ship them under /usr/share/doc instead. A total failure leaves an empty
+    # cache, which degrades to no key bindings (and a retry next startup).
+    _cached_init fzf-init.zsh 'fzf --zsh 2>/dev/null || cat /usr/share/doc/fzf/examples/key-bindings.zsh 2>/dev/null' $commands[fzf]
     # Terminator grabs Ctrl-T for new-tab, so also bind the fzf file widget to
     # Alt-T (works inside Terminator and out). Guarded on the widget existing, in
     # case an old fzf shipped no --zsh integration and the cache is empty.
@@ -1675,14 +1750,16 @@ fi
 if (( $+commands[bwrap] )) && [[ -x /usr/local/bin/up ]]; then
     UPCOMMAND="bwrap --die-with-parent --ro-bind / / --bind /tmp /tmp --dev /dev --proc /proc --tmpfs /var --tmpfs /run --dir /run/user/$UID --unshare-pid --unshare-cgroup --unshare-ipc --unshare-net --cap-drop ALL /usr/local/bin/up"
     zle-upify() {
+        emulate -L zsh -o extendedglob
         local args="" buf tmp cmd
 
         if [[ -n "$ZSH_UP_UNSAFE_FULL_THROTTLE" ]]; then
             args="--unsafe-full-throttle"
         fi
 
-        # Trim the whitespace and the last pipe character
-        buf="$(echo -n "$BUFFER" | sed 's/[ |]*$//')"
+        # Trim trailing whitespace and pipe characters (fork-free, like
+        # bracketed-paste above)
+        buf="${BUFFER%%[ |]#}"
 
         # Run up and save the output to a temporary file
         tmp="$(mktemp)"
@@ -1774,13 +1851,15 @@ export PATH=$HOME/.local/bin:$PATH
 EOF
 
 # Coldark-Cold is a light theme and is illegible on a dark terminal. When the
-# terminal background is dark, drop BAT_THEME so bat uses its dark default.
-# Only act on a positive dark detection (see is_dark_terminal).
+# terminal background is dark, drop BAT_THEME from the rendered config so bat
+# uses its dark default. Only act on a positive dark detection (see
+# is_dark_terminal).
 if is_dark_terminal; then
-    sed -i '/^[[:space:]]*export BAT_THEME=/d' ~/.zshrc
+    sed -i '/^[[:space:]]*export BAT_THEME=/d' "$ZSHRC_TMP"
     log "Dark terminal detected: removed bat's light theme (Coldark-Cold)"
 fi
-fi
+
+install_user_config "$ZSHRC_TMP" ~/.zshrc "Overwrite existing .zshrc (strongly recommended on first run!)?" "Y"
 
 # Migrate bash history to zsh if switching from bash
 if [[ -f ~/.bash_history && "$SHELL" =~ bash ]]; then
@@ -1794,7 +1873,7 @@ if [[ -f ~/.bash_history && "$SHELL" =~ bash ]]; then
 
         # Convert bash history to zsh format using inline Python script
         # Based on: https://gist.github.com/muendelezaji/c14722ab66b505a49861b8a74e52b274
-        if cat ~/.bash_history | python3 -c '
+        if python3 -c '
 import sys
 import time
 
@@ -1809,7 +1888,7 @@ for line in sys.stdin.readlines():
     else:
         sys.stdout.write(": %s:0;%s\n" % (timestamp or int(time.time()), line))
         timestamp = None
-' >> ~/.zsh_history 2>/dev/null; then
+' < ~/.bash_history >> ~/.zsh_history 2>/dev/null; then
             log "Bash history successfully migrated to ~/.zsh_history"
         else
             log "Warning: Failed to migrate bash history. Continuing anyway..."
@@ -1850,22 +1929,16 @@ fi
 # Written even if pwsh isn't installed yet, so it's ready when it is. The profile
 # itself works on Windows PowerShell 5.1 and PowerShell 7.2+, Windows and Linux.
 PWSH_PROFILE="$HOME/.config/powershell/profile.ps1"
-OVERWRITE_PWSH=true
-if [ -f "$PWSH_PROFILE" ]; then
-    if prompt_yes_no "Overwrite existing PowerShell profile?" "N"; then
-        backup_file "$PWSH_PROFILE"
-    else
-        OVERWRITE_PWSH=false
-        log "Keeping existing PowerShell profile"
-    fi
-fi
+log "Configuring PowerShell profile..."
+mkdir -p "$HOME/.config/powershell"
 
-if [ "$OVERWRITE_PWSH" = true ]; then
-    log "Configuring PowerShell profile..."
-    mkdir -p "$HOME/.config/powershell"
+# Render the profile (base + optional light theme) to a temp file;
+# install_user_config below compares it against any existing profile and only
+# prompts/backs up when the content differs.
+PWSH_TMP=$(mktemp)
 
-    # Base quality-of-life settings (always written).
-    cat > "$PWSH_PROFILE" << 'PWSHEOF'
+# Base quality-of-life settings (always written).
+cat > "$PWSH_TMP" << 'PWSHEOF'
 # PowerShell profile - managed by linux-setup.sh
 # UTF-8 for correct ANSI/glyph rendering. Wrapped: setting console encoding can
 # throw when stdout is redirected / no real console is attached. Mostly a no-op
@@ -1904,13 +1977,13 @@ if ($hasPSReadLine) {
 }
 PWSHEOF
 
-    # Apply the light theme only when the terminal is POSITIVELY light.
-    # PowerShell's built-in colors are dark-optimized, so on an
-    # undeterminable result we keep those defaults (unlike bat, which
-    # defaults to light).
-    if is_light_terminal; then
-        log "Light terminal detected: applying PowerShell light theme"
-        cat >> "$PWSH_PROFILE" << 'PWSHEOF'
+# Apply the light theme only when the terminal is POSITIVELY light.
+# PowerShell's built-in colors are dark-optimized, so on an
+# undeterminable result we keep those defaults (unlike bat, which
+# defaults to light).
+if is_light_terminal; then
+    log "Light terminal detected: applying PowerShell light theme"
+    cat >> "$PWSH_TMP" << 'PWSHEOF'
 
 # === Light-background theme (a light terminal was detected during setup) ===
 # Colors mimic the PowerShell ISE light theme. PS 7.2+ uses the native $PSStyle
@@ -1972,29 +2045,21 @@ if ($PSVersionTable.PSVersion -ge [version]'7.2') {
     }
 }
 PWSHEOF
-    else
-        log "Dark/undetermined terminal: keeping PowerShell default (dark) colors"
-    fi
+else
+    log "Dark/undetermined terminal: keeping PowerShell default (dark) colors"
 fi
+
+install_user_config "$PWSH_TMP" "$PWSH_PROFILE" "Overwrite existing PowerShell profile?" "N"
 
 # Configure Terminator
 if has_desktop_environment; then
     log "Configuring Terminator..."
     mkdir -p ~/.config/terminator
 
-    # Check if Terminator config exists and prompt for overwrite
-    OVERWRITE_TERMINATOR=true
-    if [ -f ~/.config/terminator/config ]; then
-        if prompt_yes_no "Overwrite existing Terminator config?" "N"; then
-            backup_file ~/.config/terminator/config
-        else
-            OVERWRITE_TERMINATOR=false
-            log "Keeping existing Terminator config"
-        fi
-    fi
-
-    if [ "$OVERWRITE_TERMINATOR" = true ]; then
-cat > ~/.config/terminator/config << 'EOF'
+    # Render the config to a temp file; install_user_config below compares it
+    # against any existing config and only prompts/backs up when it differs.
+    TERMINATOR_TMP=$(mktemp)
+cat > "$TERMINATOR_TMP" << 'EOF'
 [global_config]
   focus = mouse
   enabled_plugins = LaunchpadBugURLHandler, LaunchpadCodeURLHandler, APTURLHandler, TabNumbers
@@ -2047,14 +2112,14 @@ cat > ~/.config/terminator/config << 'EOF'
       parent = window0
 [plugins]
 EOF
-    fi
+    install_user_config "$TERMINATOR_TMP" ~/.config/terminator/config "Overwrite existing Terminator config?" "N"
 
     # Install Terminator tab numbers plugin
     log "Installing Terminator tab numbers plugin..."
     mkdir -p ~/.config/terminator/plugins
 
     if [[ ! -f ~/.config/terminator/plugins/tab_numbers.py ]]; then
-        if curl --proto '=https' --tlsv1.2 -fsSL -o ~/.config/terminator/plugins/tab_numbers.py https://raw.githubusercontent.com/c0ffee0wl/terminator-tab-numbers-plugin/main/tab_numbers.py; then
+        if fetch_install --mode 644 https://raw.githubusercontent.com/c0ffee0wl/terminator-tab-numbers-plugin/main/tab_numbers.py ~/.config/terminator/plugins/tab_numbers.py; then
             log "Terminator tab numbers plugin installed successfully"
         else
             warn "Failed to download Terminator tab numbers plugin"
@@ -2069,18 +2134,10 @@ fi
 # Configure tmux (self-contained sensible defaults, emacs keybindings).
 # tmux is a headless CLI tool, so this is written regardless of desktop.
 log "Configuring tmux..."
-OVERWRITE_TMUX=true
-if [ -f ~/.tmux.conf ]; then
-    if prompt_yes_no "Overwrite existing tmux config?" "N"; then
-        backup_file ~/.tmux.conf
-    else
-        OVERWRITE_TMUX=false
-        log "Keeping existing tmux config"
-    fi
-fi
-
-if [ "$OVERWRITE_TMUX" = true ]; then
-cat > ~/.tmux.conf << 'EOF'
+# Render the config to a temp file; install_user_config below compares it
+# against any existing ~/.tmux.conf and only prompts/backs up when it differs.
+TMUX_TMP=$(mktemp)
+cat > "$TMUX_TMP" << 'EOF'
 # tmux configuration - managed by linux-setup.sh
 # Self-contained sensible defaults; no plugin manager, no network deps.
 
@@ -2124,7 +2181,7 @@ bind a   split-window -h -c "#{pane_current_path}"
 # --- Quick reload ---
 bind r source-file ~/.tmux.conf \; display-message "tmux.conf reloaded"
 EOF
-fi
+install_user_config "$TMUX_TMP" ~/.tmux.conf "Overwrite existing tmux config?" "N"
 
 #############################################################################
 # Source-built CLI tools
@@ -2140,7 +2197,7 @@ fi
 # 'up' is already on PATH (it lives in /usr/local/bin, always on PATH). This also
 # avoids pulling a potentially hijacked @latest from a dormant namespace.
 install_go_tool "up" "github.com/akavel/up@latest" once
-sudo cp "$HOME/go/bin/up" /usr/local/bin/ 2>/dev/null || true
+[ -x /usr/local/bin/up ] || sudo cp "$HOME/go/bin/up" /usr/local/bin/ 2>/dev/null || true
 
 # Configure AppArmor to allow bwrap to create user namespaces
 # Ubuntu 24.04+ restricts unprivileged user namespaces via AppArmor by default,
@@ -2171,24 +2228,17 @@ else
 fi
 
 # Install Go-based tools
-GO_VERSION=$(get_go_version)
-MINIMUM_GO_VERSION=124  # Go 1.24
-
 install_go_tool "eget" "github.com/zyedidia/eget@latest"
 
 # yq and lazygit: prefer a recent apt package, else build with 'go install'
-# (needs Go 1.24+). yq's apt package is 'yq-go' (binary yq-go); we symlink 'yq'.
-install_go_tool_apt "yq"      "yq-go"   "$YQ_MIN"      "github.com/mikefarah/yq/v4@latest"       "yq-go"   "$MINIMUM_GO_VERSION"
-install_go_tool_apt "lazygit" "lazygit" "$LAZYGIT_MIN" "github.com/jesseduffield/lazygit@latest" "lazygit" "$MINIMUM_GO_VERSION"
+# (needs Go >= GO_MIN). yq's apt package is 'yq-go' (binary yq-go); we symlink 'yq'.
+install_go_tool_apt "yq"      "yq-go"   "$YQ_MIN"      "github.com/mikefarah/yq/v4@latest"       "yq-go"   "$GO_MIN"
+install_go_tool_apt "lazygit" "lazygit" "$LAZYGIT_MIN" "github.com/jesseduffield/lazygit@latest" "lazygit" "$GO_MIN"
 
-# lazydocker and gitsnip are not packaged in Debian/Ubuntu/Kali - always build (Go 1.24+)
-if [ "$GO_VERSION" -ge "$MINIMUM_GO_VERSION" ]; then
-    install_go_tool "lazydocker" "github.com/jesseduffield/lazydocker@latest"
-    install_go_tool "gitsnip" "github.com/dagimg-dot/gitsnip/cmd/gitsnip@latest"
-else
-    GO_VERSION_STR=$(go version 2>/dev/null | grep -oP 'go\K[0-9]+\.[0-9]+' | head -1 || true)
-    warn "Skipping lazydocker and gitsnip - require Go 1.24+, found Go ${GO_VERSION_STR:-unknown}"
-fi
+# lazydocker and gitsnip are not packaged in Debian/Ubuntu/Kali - always build
+# (the min-Go gate lives in install_go_tool)
+install_go_tool "lazydocker" "github.com/jesseduffield/lazydocker@latest" update "$GO_MIN"
+install_go_tool "gitsnip" "github.com/dagimg-dot/gitsnip/cmd/gitsnip@latest" update "$GO_MIN"
 
 
 # Install zoxide: prefer a recent apt package (Kali/sid ship 0.9.x), else the
@@ -2205,10 +2255,9 @@ else
     ZOXIDE_INSTALLER=$(mktemp)
     # Non-fatal: a failed download/install records zoxide and continues (the
     # .zshrc guards 'zoxide init' with $+commands[zoxide]). '&&'/'||' are
-    # left-associative, so this is (curl && sh) || note_build_failure.
-    curl --proto '=https' --tlsv1.2 -sSfL \
+    # left-associative, so this is (fetch_url && sh) || note_build_failure.
+    fetch_url -o "$ZOXIDE_INSTALLER" \
         https://raw.githubusercontent.com/ajeetdsouza/zoxide/main/install.sh \
-        -o "$ZOXIDE_INSTALLER" \
         && sh "$ZOXIDE_INSTALLER" --bin-dir "$HOME/.local/bin" \
         || note_build_failure "zoxide"
     rm -f "$ZOXIDE_INSTALLER"
@@ -2234,7 +2283,7 @@ fi
 install_apt_only "procs" "procs"
 install_apt_only "dust"  "du-dust"
 
-if is_kali_linux && [ "$NO_HACKING_TOOLS" != true ]; then
+if want_hacking_tools; then
 
     # Install Project Discovery tool manager (Kali-specific tools)
     install_go_tool "pdtm" "github.com/projectdiscovery/pdtm/cmd/pdtm@latest"
@@ -2310,7 +2359,7 @@ set -eo pipefail
 export LC_ALL=C.UTF-8
 export LANG=C.UTF-8
 
-VERSION="1.2.0"
+VERSION="1.2.1"
 
 # Overridable paths/thresholds: production defaults; overridden by tests, or by
 # an operator to steer detection (e.g. ESP_PATH when auto-detection misfires).
@@ -2391,20 +2440,22 @@ parse_args() {
     done
 }
 
-# Read KEY from an os-release-format file, stripping surrounding quotes.
-osr() {
-    [ -r "$OS_RELEASE_FILE" ] || return 1
-    local l
-    l=$(grep -E "^$1=" "$OS_RELEASE_FILE" 2>/dev/null | head -1) || return 1
-    l="${l#*=}"; l="${l%\"}"; l="${l#\"}"
-    printf '%s' "$l"
-}
-
 # Read key $2 from key=value file $1 (empty when absent/unreadable).
 kv_get() {
     [ -r "$1" ] || return 0
     grep -E "^$2=" "$1" 2>/dev/null | head -1 | cut -d= -f2- || true
 }
+
+# Read KEY from an os-release-format file: kv_get plus quote-stripping.
+osr() {
+    local l
+    l=$(kv_get "$OS_RELEASE_FILE" "$1")
+    l="${l%\"}"; l="${l#\"}"
+    printf '%s' "$l"
+}
+
+# True when dpkg has no half-installed/unconfigured packages (apt is usable).
+dpkg_consistent() { [ -z "$(dpkg --audit 2>/dev/null)" ]; }
 
 check_already_kali() {
     if [ "$(osr ID || true)" = "kali" ]; then
@@ -2503,13 +2554,25 @@ is_vm() {
     systemd-detect-virt --vm --quiet 2>/dev/null
 }
 
-# kernel-install entry token: explicit file, else the machine id.
+# kernel-install entry token: explicit token file first (doubles as the test
+# override), then kernel-install's own resolution - the authoritative source,
+# covering install.conf ENTRY_TOKEN= and os-release IMAGE_ID/ID modes
+# (systemd 251+, so present on Debian 12) - then the machine id. Same
+# tool-first layering as find_esp's bootctl call. Memoized in _ENTRY_TOKEN:
+# several callers (including per-item removal loops) need it, it cannot change
+# mid-run, and the kernel-install exec is the expensive step.
 entry_token() {
-    if [ -s "$ENTRY_TOKEN_FILE" ]; then
-        cat "$ENTRY_TOKEN_FILE"
-    elif [ -s "$MACHINE_ID_FILE" ]; then
-        cat "$MACHINE_ID_FILE"
+    if [ -z "${_ENTRY_TOKEN+x}" ]; then
+        if [ -s "$ENTRY_TOKEN_FILE" ]; then
+            _ENTRY_TOKEN=$(cat "$ENTRY_TOKEN_FILE")
+        else
+            _ENTRY_TOKEN=$(kernel-install --print-entry-token 2>/dev/null) || _ENTRY_TOKEN=""
+            if [ -z "$_ENTRY_TOKEN" ] && [ -s "$MACHINE_ID_FILE" ]; then
+                _ENTRY_TOKEN=$(cat "$MACHINE_ID_FILE")
+            fi
+        fi
     fi
+    printf '%s' "$_ENTRY_TOKEN"
 }
 
 # Print the ESP mountpoint, or nothing when there is none (BIOS boot).
@@ -2531,7 +2594,8 @@ find_esp() {
 
 # True when kernel-install copies kernels+initrds onto the ESP ($1).
 # Version dirs hold `linux`/`initrd` (upstream kernel-install naming) or
-# `vmlinuz-<ver>`/`initrd.img-<ver>` (Debian's systemd-boot hook naming).
+# `vmlinuz-<ver>`/`initrd.img-<ver>` (Debian's systemd-boot hook naming) -
+# keep the naming variants in sync with clean_stale_esp_copies.
 kernels_on_esp() {
     local esp="$1" token
     token=$(entry_token)
@@ -2645,7 +2709,8 @@ clean_stale_esp_copies() {
         for f in "$verdir"initrd*; do
             if size_mismatch "$f" "$BOOT_DIR/initrd.img-$ver"; then stale+=("$f"); fi
         done
-        # Kernel copy: `linux` (upstream naming) or `vmlinuz-<ver>` (Debian hook).
+        # Kernel copy: `linux` (upstream naming) or `vmlinuz-<ver>` (Debian
+        # hook) - keep the naming variants in sync with kernels_on_esp.
         for f in "$verdir"linux "$verdir"vmlinuz-*; do
             if size_mismatch "$f" "$BOOT_DIR/vmlinuz-$ver"; then stale+=("$f"); fi
         done
@@ -2701,7 +2766,7 @@ remove_surplus_kernels() {
     [ "${#candidates[@]}" -gt 0 ] || return 1
     warn "Kernels that are neither running nor newest are taking ESP space: ${candidates[*]}"
     ask_yn "Remove them to free ESP space (the running and the newest kernel are kept)?" || return 1
-    if [ -z "$(dpkg --audit 2>/dev/null)" ]; then
+    if dpkg_consistent; then
         apt_ni purge -y "${candidates[@]/#/linux-image-}"
     else
         for v in "${candidates[@]}"; do
@@ -2831,7 +2896,7 @@ finish_conversion() {
 # block the tool from ever converging and cleaning its own marker.
 conversion_complete() {
     [ "$(osr ID || true)" = "kali" ] || return 1
-    [ -z "$(dpkg --audit 2>/dev/null)" ] || return 1
+    dpkg_consistent || return 1
     local mp
     mp=$(kv_get "$STATE_FILE" metapackage)
     [ -z "$mp" ] || dpkg -s "$mp" 2>/dev/null | grep -q '^Status: install ok installed'
@@ -2886,7 +2951,10 @@ SRC
 disable_debian_sources() {
     local deb822="$APT_DIR/sources.list.d/debian.sources"
     if [ -f "$deb822" ]; then
-        backup_file "$deb822"
+        # The mv itself preserves the unmodified file in $BACKUP_DIR, so no
+        # separate backup copy is needed (unlike sources.list below, which
+        # sed mutates in place).
+        mkdir -p "$BACKUP_DIR"
         mv "$deb822" "$BACKUP_DIR/debian.sources.disabled-by-upgrade-to-kali"
         log "Disabled $deb822 (moved to $BACKUP_DIR)"
     fi
@@ -2986,11 +3054,14 @@ install_upgrade_to_kali
 # Install and configure ufw-docker
 log "Installing ufw-docker..."
 if ! command -v ufw-docker &> /dev/null; then
-    # Download UFW-Docker script
-    sudo curl --proto '=https' --tlsv1.2 -fsSL -o /usr/local/bin/ufw-docker https://github.com/chaifeng/ufw-docker/raw/master/ufw-docker
-    sudo chmod +x /usr/local/bin/ufw-docker
-    
-    log "ufw-docker installed successfully"
+    # Non-fatal: a failed download is recorded in the end-of-run summary, skips
+    # the rules below, and retries on the next run (the command -v gate above)
+    # instead of aborting the whole run this late.
+    if fetch_install --sudo --mode 755 https://github.com/chaifeng/ufw-docker/raw/master/ufw-docker /usr/local/bin/ufw-docker; then
+        log "ufw-docker installed successfully"
+    else
+        note_build_failure "ufw-docker"
+    fi
 else
     log "ufw-docker is already installed"
 fi
@@ -2998,7 +3069,7 @@ fi
 # ufw ourselves (that risks SSH lockout), so this fires only on an already-firewalled
 # box. LC_ALL is passed on sudo's command line (sudo resets the env, so the global
 # export doesn't reach it) to force a locale-independent "Status: active" match.
-if command -v docker &> /dev/null && command -v ufw &> /dev/null \
+if command -v ufw-docker &> /dev/null && command -v docker &> /dev/null && command -v ufw &> /dev/null \
         && sudo LC_ALL=C.UTF-8 ufw status 2>/dev/null | grep -Fq "Status: active"; then
     if sudo grep -q "^# BEGIN UFW AND DOCKER" /etc/ufw/after.rules 2>/dev/null; then
         log "ufw-docker rules already present in /etc/ufw/after.rules; nothing to do"
@@ -3006,7 +3077,10 @@ if command -v docker &> /dev/null && command -v ufw &> /dev/null \
         warn "ufw is active. Applying ufw-docker BLOCKS external access to all published"
         warn "Docker container ports (FORWARD/DOCKER-USER chain only - host services like"
         warn "SSH are unaffected). Re-expose a port with: sudo ufw-docker allow <container> <port>"
-        published="$(docker ps --format '{{.Names}} {{.Ports}}' 2>/dev/null | grep -F '->' || true)"
+        # sudo: on a fresh install the user's docker group membership is not
+        # effective until re-login, so a plain docker ps would silently fail
+        # and the listing would never show on the run where it matters most.
+        published="$(sudo docker ps --format '{{.Names}} {{.Ports}}' 2>/dev/null | grep -F '->' || true)"
         [[ -n "$published" ]] && { warn "Currently published containers:"; printf '%s\n' "$published"; }
         if prompt_yes_no "Apply ufw-docker firewall rules now?" "Y"; then
             if sudo ufw-docker install; then
@@ -3020,7 +3094,7 @@ if command -v docker &> /dev/null && command -v ufw &> /dev/null \
         fi
     fi
 else
-    log "ufw is not active; skipping ufw-docker rules"
+    log "ufw not active (or docker/ufw-docker missing); skipping ufw-docker rules"
     log "To harden Docker ports later: sudo ufw enable && sudo ufw-docker install && sudo ufw reload"
 fi
 
@@ -3034,7 +3108,11 @@ if systemctl is-active --quiet systemd-resolved 2>/dev/null; then
 DNSStubListener=no
 EOF
     sudo ln -sf /run/systemd/resolve/resolv.conf /etc/resolv.conf
-    sudo systemctl restart systemd-resolved || true
+    # Restart only when the drop-in actually changed (CONFIG_CHANGED is set by
+    # write_config_file); the resolv.conf symlink alone needs no restart.
+    if [ "$CONFIG_CHANGED" = true ]; then
+        sudo systemctl restart systemd-resolved || true
+    fi
     log "systemd-resolved configured successfully"
 else
     log "systemd-resolved not active, skipping configuration"
@@ -3091,7 +3169,7 @@ if has_desktop_environment; then
 fi
 
 if [ ${#FAILED_BUILDS[@]} -gt 0 ]; then
-    warn "These optional source-built tools were skipped after a failed build:"
+    warn "These optional tools were skipped after a failed build/download:"
     for t in "${FAILED_BUILDS[@]}"; do warn "  - $t"; done
     warn "Your shell is fully configured regardless. Re-run to retry (on low-RAM VMs, add swap first)."
 fi
