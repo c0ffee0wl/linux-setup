@@ -2359,7 +2359,7 @@ set -eo pipefail
 export LC_ALL=C.UTF-8
 export LANG=C.UTF-8
 
-VERSION="1.4.0"
+VERSION="1.5.0"
 
 # Overridable paths/thresholds: production defaults; overridden by tests, or by
 # an operator to steer detection (e.g. ESP_PATH when auto-detection misfires).
@@ -3332,6 +3332,9 @@ do_conversion() {
     run_step_with_esp_recovery apt_ni install -y kali-archive-keyring "$KALI_METAPACKAGE"
     log "Removing packages that are no longer required"
     apt_ni -y autoremove --purge
+    # Drop the multi-GB .deb cache the rebase left behind. Best-effort: the
+    # EXIT trap is still armed, and hygiene must not report a failed conversion.
+    apt_ni clean || true
     finish_conversion
     ok "Conversion complete. New system identity:"
     grep -E '^(PRETTY_NAME|ID|VERSION)=' "$OS_RELEASE_FILE" | sed 's/^/    /'
