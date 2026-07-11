@@ -174,18 +174,18 @@ On **Debian 12 (bookworm) or newer**, the setup script drops a standalone conver
 
 ```bash
 sudo upgrade-to-kali          # asks for confirmation before the rebase
-sudo upgrade-to-kali --yes    # non-interactive (skip the confirmation)
+sudo upgrade-to-kali --yes    # non-interactive (required when stdin is not a terminal)
 ```
 
 What it does:
 
-1. Runs a disk-space preflight. On systemd-boot systems (e.g. DigitalOcean droplets) the kernel **and full initrd** are copied onto the EFI System Partition, and Kali initrds (~200 MB) are far larger than Debian's — a too-small ESP would break the upgrade midway. The preflight offers to remove stale/truncated boot files from the ESP, to purge surplus old kernels (never the running or the newest one — each frees a whole kernel+initrd pair), and, on VMs, to write a `MODULES=dep` initramfs config that shrinks the initrds enough to fit; otherwise it aborts with manual guidance before anything is changed (`--skip-preflight` to override)
+1. Runs a disk-space preflight. On systemd-boot systems (e.g. DigitalOcean droplets with their ~105 MiB ESPs) the kernel **and full initrd** are copied onto the EFI System Partition, and Kali initrds (~200 MB) are far larger than Debian's — a too-small ESP would break the upgrade midway. The preflight offers to remove stale/truncated boot files and former-machine-id duplicates from the ESP (cloud images regenerate the machine id on first boot, leaving the pre-baked kernel copy under an old entry token), to purge surplus old kernels (never the running or the newest one — each frees a whole kernel+initrd pair), and, on VMs, to write a `MODULES=dep` + xz-compression initramfs config that shrinks the initrds enough to fit; a hopelessly small ESP aborts with manual guidance before anything is changed (`--skip-preflight` to override)
 2. Adds the Kali `kali-rolling` repository and archive keyring
 3. **Disables** the existing Debian repositories, since Kali doesn't support mixing Debian and Kali repos (backups go to `/etc/apt/upgrade-to-kali-backup/`)
-4. Runs a full `apt full-upgrade` against `kali-rolling`, which rebases the base system onto Kali
+4. Runs a full `apt full-upgrade` against `kali-rolling`, which rebases the base system onto Kali. If the kernel copy hits `No space left on device` on the ESP mid-upgrade anyway, the tool recovers on its own — cleans the truncated copy, shrinks the initrds, evicts old kernels' boot files if needed, repairs dpkg — and retries once, so a single invocation converges even on fresh small-ESP cloud VMs
 5. Installs a Kali metapackage: `kali-linux-default` if a desktop is detected, otherwise `kali-linux-headless` (override with the `KALI_METAPACKAGE` env var)
 
-If the conversion fails midway (network drop, disk full, Ctrl-C), it prints the recovery commands and leaves a marker at `/var/lib/upgrade-to-kali/state` — just re-run `sudo upgrade-to-kali` and it repairs dpkg and resumes where it left off. The `MODULES=dep` config written on VMs persists after conversion (revert instructions are inside the file, `/etc/initramfs-tools/conf.d/upgrade-to-kali-modules.conf`).
+If the conversion still fails midway (network drop, Ctrl-C), it prints the recovery commands and leaves a marker at `/var/lib/upgrade-to-kali/state` — just re-run `sudo upgrade-to-kali` and it repairs dpkg and resumes where it left off. The `MODULES=dep` config written on VMs persists after conversion (revert instructions are inside the file, `/etc/initramfs-tools/conf.d/upgrade-to-kali-modules.conf`). On ESPs too small to hold two kernel pairs it ends with a warning: after verifying the new kernel boots, purge the old one — and purge the previous kernel before each future kernel upgrade — or the next upgrade can hit the same ENOSPC.
 
 > **⚠️ Important**: This is effectively irreversible, so take a VM snapshot or backup first. It only works on Debian, not Ubuntu. From Debian 12 (bookworm) it's a larger jump than from 13, because the rebase skips a Debian release. After it finishes, reboot and (optionally) re-run `linux-setup.sh`; it will detect Kali this time and install the pentest tooling.
 

@@ -12,7 +12,7 @@ set -eo pipefail
 export LC_ALL=C.UTF-8
 export LANG=C.UTF-8
 
-VERSION="2.17.0"
+VERSION="2.18.0"
 FORCE_MODE=false
 NO_MODE=false
 NO_HACKING_TOOLS=false
@@ -2359,7 +2359,7 @@ set -eo pipefail
 export LC_ALL=C.UTF-8
 export LANG=C.UTF-8
 
-VERSION="1.2.1"
+VERSION="1.3.0"
 
 # Overridable paths/thresholds: production defaults; overridden by tests, or by
 # an operator to steer detection (e.g. ESP_PATH when auto-detection misfires).
@@ -2378,14 +2378,22 @@ MODULES_CONF="${MODULES_CONF:-$INITRAMFS_CONF_DIR/upgrade-to-kali-modules.conf}"
 STATE_FILE="${STATE_FILE:-/var/lib/upgrade-to-kali/state}"
 ROOT_MIN_FREE_KIB="${ROOT_MIN_FREE_KIB:-6291456}"    # 6 GiB, warn-only
 ESP_FLOOR_MOST_KIB="${ESP_FLOOR_MOST_KIB:-307200}"   # 300 MiB (Debian trixie guidance)
-ESP_FLOOR_DEP_KIB="${ESP_FLOOR_DEP_KIB:-65536}"      # 64 MiB
+ESP_FLOOR_DEP_KIB="${ESP_FLOOR_DEP_KIB:-65536}"      # 64 MiB: below = hopeless, abort
 ESP_HEADROOM_PCT="${ESP_HEADROOM_PCT:-25}"           # margin on a measured kernel pair
+# First-run guess for the incoming Kali generic-kernel pair on the ESP under
+# MODULES=dep + xz (~16-20 MiB vmlinuz + ~35-55 MiB initrd, plus slack). Used
+# only until the conversion's own kernel exists and can be measured.
+ESP_KALI_PAIR_DEP_KIB="${ESP_KALI_PAIR_DEP_KIB:-81920}"   # 80 MiB
+# ESPs below this total cannot hold two Kali kernel pairs, so routine kernel
+# upgrades would hit ENOSPC - the post-conversion advisory explains the fix.
+ESP_SMALL_TOTAL_KIB="${ESP_SMALL_TOTAL_KIB:-163840}"      # 160 MiB (2x pair)
 # Empty means auto-select at conversion time: kali-linux-default when a desktop
 # is present, else kali-linux-headless. Set the env var to force a choice.
 KALI_METAPACKAGE="${KALI_METAPACKAGE:-}"
 ASSUME_YES=false
 RESUME=false
 SKIP_PREFLIGHT=false
+RECOVERY_RAN=false
 
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
     C_RED='\033[0;31m'; C_GREEN='\033[0;32m'; C_YELLOW='\033[1;33m'
@@ -2417,14 +2425,17 @@ The base-system rebase is effectively irreversible - snapshot/back up first.
 
 Before converting, a preflight checks free disk space. On systemd-boot
 systems the kernel and full initrd are copied onto the EFI System Partition,
-and Kali initrds are much larger than Debian's - a too-small ESP aborts the
-run. To make room the tool offers to remove stale boot files and surplus old
-kernels (never the running or the newest one), and on virtual machines to
-write a persistent MODULES=dep initramfs config (revert instructions inside
-the written file) so the initrds shrink enough to fit.
+and Kali initrds are much larger than Debian's - a hopelessly small ESP
+aborts the run. To make room the tool offers to remove stale or duplicate
+boot files and surplus old kernels (never the running or the newest one),
+and on virtual machines to write a persistent MODULES=dep + xz initramfs
+config (revert instructions inside the written file) so the initrds shrink
+enough to fit. If the kernel copy still hits ENOSPC mid-upgrade, the tool
+cleans the ESP, shrinks the initrds and retries once on its own.
 
-If a conversion is interrupted, a marker is left at ${STATE_FILE} and
+If a conversion is interrupted anyway, a marker is left at ${STATE_FILE} and
 re-running 'sudo upgrade-to-kali' repairs dpkg and resumes the conversion.
+Without a terminal on stdin, --yes is required.
 USAGE
 }
 
@@ -2496,7 +2507,8 @@ confirm() {
     warn "It disables the Debian repositories and upgrades every base package."
     warn "This is effectively IRREVERSIBLE. Make a snapshot/backup first."
     printf 'Type YES to proceed: '
-    local r; read -r r
+    local r
+    read -r r || err "No input available (non-interactive?). Re-run with --yes."
     [ "$r" = "YES" ] || err "Aborted by user."
 }
 
@@ -2505,8 +2517,17 @@ ask_yn() {
     if $ASSUME_YES; then log "$1 -> yes (--yes)"; return 0; fi
     local r
     printf '%s [Y/n] ' "$1"
-    read -r r
+    read -r r || return 1   # EOF = no
     [ -z "$r" ] || [ "$r" = "y" ] || [ "$r" = "Y" ]
+}
+
+# Default-No variant for risky removals; deliberately NOT auto-answered by
+# --yes (a wrong yes could delete another OS's boot files).
+ask_yn_no() {
+    local r
+    printf '%s [y/N] ' "$1"
+    read -r r || return 1
+    [ "$r" = "y" ] || [ "$r" = "Y" ]
 }
 
 # Non-interactive apt-get: lock-wait + safe conffile handling.
@@ -2611,8 +2632,50 @@ kernels_on_esp() {
     return 1
 }
 
+# Top-level ESP dirs holding BLS kernel copies (the current entry token,
+# former machine-ids, other installs sharing the ESP), one per line. Detected
+# by content - version subdirs with a kernel (`linux`/`vmlinuz-*`) or an
+# initrd (a mid-copy ENOSPC can leave a version dir holding only a truncated
+# initrd) - so EFI/ and loader/ are naturally excluded.
+esp_token_dirs() {
+    local esp="$1" d
+    for d in "$esp"/*/; do
+        [ -d "$d" ] || continue
+        if compgen -G "${d}*/linux" > /dev/null || \
+           compgen -G "${d}*/vmlinuz-*" > /dev/null || \
+           compgen -G "${d}*/initrd*" > /dev/null; then
+            printf '%s\n' "${d%/}"
+        fi
+    done
+}
+
+# True when any candidate file ($2..) exists with the same size as $1.
+any_size_match() {
+    local src="$1" want f
+    shift
+    [ -f "$src" ] || return 1
+    want=$(stat -c %s "$src")
+    for f in "$@"; do
+        if [ -f "$f" ] && [ "$(stat -c %s "$f")" = "$want" ]; then return 0; fi
+    done
+    return 1
+}
+
+# True when $esp/$2/$3 holds a complete copy of local kernel version $3:
+# kernel and initrd both present (either naming variant) and sizes matching
+# the /boot sources.
+esp_copy_intact() {
+    local d="$1/$2/$3"
+    any_size_match "$BOOT_DIR/vmlinuz-$3" "$d/linux" "$d/vmlinuz-$3" && \
+        any_size_match "$BOOT_DIR/initrd.img-$3" "$d"/initrd*
+}
+
 free_kib() {
     df -Pk "$1" | awk 'NR==2 {print $4}'
+}
+
+total_kib() {
+    df -Pk "$1" | awk 'NR==2 {print $2}'
 }
 
 # Largest du -k of the given files; 0 when none exist.
@@ -2643,42 +2706,80 @@ newest_boot_kernel() {
     printf '%s' "$newest"
 }
 
-# Estimated KiB the incoming Kali kernel+initrd needs on the ESP.
-# $1 = most|dep (the initramfs MODULES policy the estimate is for).
-# Once the conversion has installed its kernel - any /boot version newer than
-# the baseline recorded in the state marker; vendor naming is deliberately not
-# used, Kali kernel ABIs have not always contained "kali" - measure that pair
-# plus ESP_HEADROOM_PCT: its ESP copies overwrite in place, so free space only
-# has to absorb roughly one extra pair (a newer version arriving mid-upgrade).
-# Before that there is nothing to measure, so guess: 2x the largest Debian
-# pair with a floor, because a Debian cloud kernel's ~30 MB initrd predicts
-# nothing about Kali's ~200 MB one (the MODULES=most floor is the Debian
-# trixie release notes' "at least 300 MB free" guidance).
-esp_required_kib() {
-    local baseline newest pair need floor
+# All /boot kernel versions except the newest, one per line.
+nonnewest_boot_kernels() {
+    local newest v
+    newest=$(newest_boot_kernel)
+    while IFS= read -r v; do
+        if [ "$v" != "$newest" ]; then printf '%s\n' "$v"; fi
+    done < <(boot_kernel_versions)
+}
+
+# The conversion-installed kernel: any /boot version newer than the baseline
+# recorded in the state marker (empty before the marker exists or before the
+# upgrade installs one). Vendor naming is deliberately not used - Kali kernel
+# ABIs lacked a "kali" substring for the whole 6.6 era.
+conversion_kernel() {
+    local baseline newest
     baseline=$(kv_get "$STATE_FILE" baseline_kernel)
     newest=$(newest_boot_kernel)
-    if [ -n "$baseline" ] && [ -n "$newest" ] && dpkg --compare-versions "$newest" gt "$baseline"; then
-        pair=$(( $(max_file_kib "$BOOT_DIR/vmlinuz-$newest") + $(max_file_kib "$BOOT_DIR/initrd.img-$newest"*) ))
-        need=$(( pair * (100 + ESP_HEADROOM_PCT) / 100 ))
+    [ -n "$baseline" ] && [ -n "$newest" ] || return 0
+    if dpkg --compare-versions "$newest" gt "$baseline"; then printf '%s' "$newest"; fi
+    return 0
+}
+
+# KiB of one kernel version's ($1) /boot pair: vmlinuz plus (largest) initrd.
+pair_kib() {
+    printf '%s' $(( $(max_file_kib "$BOOT_DIR/vmlinuz-$1") + $(max_file_kib "$BOOT_DIR/initrd.img-$1"*) ))
+}
+
+# Estimated KiB the incoming Kali kernel+initrd needs on the ESP ($2).
+# $1 = most|dep (the initramfs MODULES policy the estimate is for).
+# Once the conversion has installed its kernel (conversion_kernel), measure:
+# staged intact under the current token means nothing is left to copy (need
+# 0); else its pair plus ESP_HEADROOM_PCT - ESP copies overwrite in place,
+# so free space only has to absorb roughly one extra pair (a newer version
+# arriving mid-upgrade). Before that there is nothing to measure, so guess
+# the incoming pair itself: the local pair predicts nothing (a Debian cloud
+# kernel's ~30 MB initrd vs. Kali's ~200 MB one), so the dep guess is
+# ESP_KALI_PAIR_DEP_KIB and the most guess keeps 2x-the-local-pair with the
+# Debian trixie release notes' "at least 300 MB free" floor. Either guess
+# grows by the newest local pair when that kernel has no intact copy under
+# the CURRENT entry token yet: the next hook run then ADDS a copy alongside
+# the former-token one instead of overwriting in place (see
+# clean_stale_esp_copies).
+esp_required_kib() {
+    local policy="$1" esp="$2" newest need
+    newest=$(conversion_kernel)
+    if [ -n "$newest" ]; then
+        if esp_copy_intact "$esp" "$(entry_token)" "$newest"; then
+            need=0
+        else
+            need=$(( $(pair_kib "$newest") * (100 + ESP_HEADROOM_PCT) / 100 ))
+        fi
     else
-        case "$1" in
-            dep) floor="$ESP_FLOOR_DEP_KIB" ;;
-            *)   floor="$ESP_FLOOR_MOST_KIB" ;;
+        case "$policy" in
+            dep) need="$ESP_KALI_PAIR_DEP_KIB" ;;
+            *)   need=$(( ( $(max_file_kib "$BOOT_DIR"/vmlinuz-*) + $(max_file_kib "$BOOT_DIR"/initrd.img-*) ) * 2 ))
+                 if [ "$need" -lt "$ESP_FLOOR_MOST_KIB" ]; then need="$ESP_FLOOR_MOST_KIB"; fi ;;
         esac
-        need=$(( ( $(max_file_kib "$BOOT_DIR"/vmlinuz-*) + $(max_file_kib "$BOOT_DIR"/initrd.img-*) ) * 2 ))
-        if [ "$need" -lt "$floor" ]; then need=$floor; fi
+        newest=$(newest_boot_kernel)
+        if [ -n "$newest" ] && ! esp_copy_intact "$esp" "$(entry_token)" "$newest"; then
+            need=$(( need + $(pair_kib "$newest") ))
+        fi
     fi
     printf '%s' "$need"
 }
 
-# Logs the ESP's ($1) free space vs. the estimated need for MODULES=$2;
-# true when it fits.
+# Logs the ESP's ($1) free space vs. the measured/estimated need for
+# MODULES=$2; true when it fits.
 esp_fits() {
-    local need free
-    need=$(esp_required_kib "$2")
-    free=$(free_kib "$1")
-    log "ESP free: $((free / 1024)) MiB; estimated need (MODULES=$2): $((need / 1024)) MiB"
+    local esp="$1" policy="$2" need free mode
+    need=$(esp_required_kib "$policy" "$esp")
+    free=$(free_kib "$esp")
+    mode="estimated"
+    if [ -n "$(conversion_kernel)" ]; then mode="measured"; fi
+    log "ESP free: $((free / 1024)) MiB; $mode need (MODULES=$policy): $((need / 1024)) MiB"
     [ "$free" -ge "$need" ]
 }
 
@@ -2688,65 +2789,115 @@ size_mismatch() {
 }
 
 # Remove provably-stale boot files from the ESP (prompted): version dirs for
-# kernels that no longer exist locally, and truncated/partial copies whose
-# size differs from the /boot source (what a mid-copy ENOSPC leaves behind).
+# kernels that no longer exist locally, truncated/partial copies whose size
+# differs from the /boot source (what a mid-copy ENOSPC leaves behind), and
+# former-token duplicates. All token dirs are scanned, not just the current
+# one: cloud images regenerate the machine id on first boot, so image-build
+# copies live under a former token, invisible to a current-token-only scan
+# and duplicated (not overwritten) by the first kernel-install run. A foreign
+# dir is a removable duplicate only when its version already has an intact
+# current-token copy - before the first regen it is the only bootable entry.
+# Foreign dirs for versions unknown to this OS may belong to ANOTHER install
+# sharing the ESP: separate default-No prompt, never auto-answered by --yes.
 # Safe because the source of truth stays in $BOOT_DIR - dpkg configure and the
 # initramfs post-update hook re-copy fresh files. Must run before measuring
 # free space AND before any resume repair: dpkg --configure -a re-triggers
-# the same ENOSPC otherwise.
+# the same ENOSPC otherwise. Always returns 0 (callers run bare under set -e).
 clean_stale_esp_copies() {
-    local esp="$1" token verdir ver f
-    local stale=()
-    token=$(entry_token)
-    [ -n "$token" ] && [ -d "$esp/$token" ] || return 0
-    for verdir in "$esp/$token"/*/; do
-        [ -d "$verdir" ] || continue
-        ver=$(basename "$verdir")
-        if [ ! -e "$BOOT_DIR/vmlinuz-$ver" ] && [ ! -d "/lib/modules/$ver" ]; then
-            stale+=("$verdir")   # orphan version: kernel is gone from the system
-            continue
+    local esp="$1" cur tdir token verdir ver f it
+    local stale=() foreign=()
+    cur=$(entry_token)
+    while IFS= read -r tdir; do
+        token=$(basename "$tdir")
+        for verdir in "$tdir"/*/; do
+            [ -d "$verdir" ] || continue
+            ver=$(basename "$verdir")
+            if [ ! -e "$BOOT_DIR/vmlinuz-$ver" ] && [ ! -d "/lib/modules/$ver" ]; then
+                # Version unknown to this OS: our orphan under the current
+                # token, possibly another OS's kernel under a foreign one.
+                if [ "$token" = "$cur" ]; then stale+=("$verdir"); else foreign+=("$verdir"); fi
+                continue
+            fi
+            if [ "$token" != "$cur" ] && [ -n "$cur" ] && esp_copy_intact "$esp" "$cur" "$ver"; then
+                stale+=("$verdir")   # former-token duplicate; the current-token copy wins
+                continue
+            fi
+            for f in "$verdir"initrd*; do
+                if size_mismatch "$f" "$BOOT_DIR/initrd.img-$ver"; then stale+=("$f"); fi
+            done
+            # Kernel copy: `linux` (upstream naming) or `vmlinuz-<ver>` (Debian
+            # hook) - keep the naming variants in sync with kernels_on_esp.
+            for f in "$verdir"linux "$verdir"vmlinuz-*; do
+                if size_mismatch "$f" "$BOOT_DIR/vmlinuz-$ver"; then stale+=("$f"); fi
+            done
+        done
+    done < <(esp_token_dirs "$esp")
+    if [ "${#stale[@]}" -gt 0 ]; then
+        warn "Stale/incomplete/duplicate boot files on the ESP (safe to remove; re-copied from $BOOT_DIR):"
+        printf '      %s\n' "${stale[@]}" >&2
+        if ask_yn "Remove them to free ESP space?"; then
+            for it in "${stale[@]}"; do
+                case "$it" in
+                    */) remove_esp_verdir "$it" ;;
+                    *)  rm -f "$it" ;;
+                esac
+            done
+            ok "Removed ${#stale[@]} stale ESP item(s)"
         fi
-        for f in "$verdir"initrd*; do
-            if size_mismatch "$f" "$BOOT_DIR/initrd.img-$ver"; then stale+=("$f"); fi
-        done
-        # Kernel copy: `linux` (upstream naming) or `vmlinuz-<ver>` (Debian
-        # hook) - keep the naming variants in sync with kernels_on_esp.
-        for f in "$verdir"linux "$verdir"vmlinuz-*; do
-            if size_mismatch "$f" "$BOOT_DIR/vmlinuz-$ver"; then stale+=("$f"); fi
-        done
-    done
-    [ "${#stale[@]}" -gt 0 ] || return 0
-    warn "Stale/incomplete boot files on the ESP (safe to remove; re-copied from $BOOT_DIR):"
-    printf '      %s\n' "${stale[@]}" >&2
-    ask_yn "Remove them to free ESP space?" || return 0
-    local it
-    for it in "${stale[@]}"; do
-        case "$it" in
-            */) remove_esp_version "$esp" "$(basename "$it")" ;;
-            *)  rm -f "$it" ;;
-        esac
-    done
-    ok "Removed ${#stale[@]} stale ESP item(s)"
+    fi
+    if [ "${#foreign[@]}" -gt 0 ]; then
+        if $ASSUME_YES; then
+            log "Left untouched (kernels unknown to this OS, never auto-removed): ${foreign[*]}"
+        else
+            warn "ESP dirs whose kernels are unknown to this OS (they may belong to ANOTHER install sharing this ESP):"
+            printf '      %s\n' "${foreign[@]}" >&2
+            if ask_yn_no "Remove them? Only say yes if no other OS boots from this disk"; then
+                for it in "${foreign[@]}"; do
+                    remove_esp_verdir "$it"
+                done
+                ok "Removed ${#foreign[@]} foreign ESP dir(s)"
+            fi
+        fi
+    fi
+    return 0
 }
 
 # Kernel versions that are safe to drop: installed in /boot but neither the
 # running kernel nor the newest one (bootctl's own eviction rule: never the
 # booted entry, never the last remaining).
 surplus_kernel_versions() {
-    local running newest v
+    local running v
     running=$(uname -r)
-    newest=$(newest_boot_kernel)
     while IFS= read -r v; do
-        if [ "$v" != "$running" ] && [ "$v" != "$newest" ]; then printf '%s\n' "$v"; fi
-    done < <(boot_kernel_versions)
+        if [ "$v" != "$running" ]; then printf '%s\n' "$v"; fi
+    done < <(nonnewest_boot_kernels)
 }
 
-# Remove a kernel version's ($2) boot files from the ESP ($1): its
-# kernel-install version dir and any loader entries referencing it.
+# Remove one version's ($3) files under one token dir ($2), plus only THAT
+# token's loader entries (kernel-install names them <token>-<ver>[+tries].conf).
+# Token-scoped on purpose: duplicate cleanup must not delete the current
+# token's kept entry.
+remove_esp_token_version() {
+    local esp="$1" token="$2" ver="$3"
+    rm -rf "${esp:?}/$token/$ver"
+    rm -f "$esp/loader/entries/$token-$ver"*.conf
+}
+
+# remove_esp_token_version for a full version-dir path ($ESP/<token>/<ver>[/]).
+remove_esp_verdir() {
+    local d="${1%/}"
+    remove_esp_token_version "$(dirname "$(dirname "$d")")" \
+        "$(basename "$(dirname "$d")")" "$(basename "$d")"
+}
+
+# Remove a kernel version's ($2) boot files from the ESP ($1) everywhere:
+# its version dir under every token dir plus any loader entry referencing it
+# - mirroring what apt purge / kernel-install remove would have achieved.
 remove_esp_version() {
-    local esp="$1" ver="$2" token
-    token=$(entry_token)
-    if [ -n "$token" ]; then rm -rf "${esp:?}/$token/$ver"; fi
+    local esp="$1" ver="$2" tdir
+    while IFS= read -r tdir; do
+        remove_esp_token_version "$esp" "$(basename "$tdir")" "$ver"
+    done < <(esp_token_dirs "$esp")
     rm -f "$esp"/loader/entries/*"$ver"*.conf
 }
 
@@ -2779,23 +2930,65 @@ remove_surplus_kernels() {
     ok "Removed ${#candidates[@]} surplus kernel(s)"
 }
 
-# Write a persistent MODULES=dep initramfs policy and regenerate all initrds
-# so they fit the small ESP. Offered on VMs only (hardware does not change).
-shrink_initramfs() {
-    log "Writing $MODULES_CONF (MODULES=dep) and regenerating initrds"
+# Persistent initramfs shrink policy: MODULES=dep (only this hardware's
+# modules - offered on VMs only, where hardware does not change) plus
+# COMPRESS=xz when available (smallest initrds; guarded because initramfs-
+# tools aborts on a configured-but-missing compressor). Rewritten in full so
+# older dep-only versions of the file pick up the compression on re-runs.
+write_shrink_conf() {
+    log "Writing $MODULES_CONF (MODULES=dep + xz compression)"
     mkdir -p "$INITRAMFS_CONF_DIR"
     cat > "$MODULES_CONF" << 'CONF'
 # Written by upgrade-to-kali: MODULES=dep keeps initrds small enough for this
-# system's small EFI System Partition (systemd-boot copies kernel+initrd there).
+# system's small EFI System Partition (systemd-boot copies kernel+initrd there);
+# COMPRESS=xz (when present) packs them hardest - slightly slower builds/boots.
 # Safe on VMs, where the (virtual) hardware does not change.
 # Revert: delete this file, then run: sudo update-initramfs -u -k all
 MODULES=dep
 CONF
-    if ! update-initramfs -u -k all; then
-        warn "update-initramfs failed - the ESP is likely still too full."
-        warn "Free ESP space manually (purge old kernels, remove stale files), then re-run."
-        err "Could not regenerate a smaller initrd."
+    if command -v xz > /dev/null 2>&1; then
+        printf 'COMPRESS=xz\n' >> "$MODULES_CONF"
+    else
+        warn "xz not found - initrds will use the default compressor (larger)"
     fi
+}
+
+# VM-only shrink remediation: prompt, write the conf, regenerate all initrds,
+# then re-clean the ESP - the regen creates current-token copies, turning any
+# pre-baked former-token pairs into reclaimable duplicates. $2=fatal aborts on
+# a failed regen (preflight: pre-confirm, nothing converted yet); $2=tolerant
+# warns and continues (recovery ladder: the retry is the verdict). True when
+# the shrink was applied.
+offer_shrink() {
+    local esp="$1" policy="$2"
+    is_vm || return 1
+    warn "The ESP is too small for Kali's default (MODULES=most) initrds."
+    ask_yn "Write MODULES=dep + xz to $MODULES_CONF and regenerate initrds now (VM-safe, persistent)?" || return 1
+    write_shrink_conf
+    log "Regenerating all initrds with the shrink policy"
+    if ! update-initramfs -u -k all; then
+        if [ "$policy" = fatal ]; then
+            warn "update-initramfs failed - the ESP is likely still too full."
+            warn "Free ESP space manually (purge old kernels, remove stale files), then re-run."
+            err "Could not regenerate a smaller initrd."
+        fi
+        warn "update-initramfs failed (likely still ENOSPC) - continuing recovery"
+    fi
+    clean_stale_esp_copies "$esp"
+    return 0
+}
+
+# Compact per-token-dir usage breakdown - makes failed-run logs diagnosable.
+# Always returns 0 (purely informational).
+log_esp_inventory() {
+    local esp="$1"
+    local total free
+    log "ESP inventory ($esp):"
+    du -sk "$esp"/*/ 2>/dev/null | awk '{printf "      %5d MiB  %s\n", $1/1024, $2}' >&2 || true
+    total=$(total_kib "$esp" 2>/dev/null) || total=0
+    free=$(free_kib "$esp" 2>/dev/null) || free=0
+    log "      total $((${total:-0} / 1024)) MiB, free $((${free:-0} / 1024)) MiB"
+    return 0
 }
 
 preflight() {
@@ -2822,6 +3015,7 @@ preflight() {
         return 0
     fi
     log "systemd-boot layout detected: kernels and initrds are copied to $esp"
+    log_esp_inventory "$esp"
     clean_stale_esp_copies "$esp"
     if esp_fits "$esp" most; then
         ok "ESP has enough free space."
@@ -2831,14 +3025,25 @@ preflight() {
         ok "ESP has enough free space."
         return 0
     fi
-    if is_vm; then
-        warn "The ESP is too small for Kali's default (MODULES=most) initrd."
-        if ask_yn "Write MODULES=dep to $MODULES_CONF and regenerate initrds now (VM-safe, persistent)?"; then
-            shrink_initramfs
-            if esp_fits "$esp" dep; then
-                ok "ESP has enough free space with MODULES=dep."
-                return 0
-            fi
+    local free
+    offer_shrink "$esp" fatal || true
+    # Verdict under the dep policy when it is in effect - from this run's
+    # shrink or a previous one (the conf persists across resumes, so the
+    # verdict must not depend on re-answering the prompt). Tight-but-
+    # plausible proceeds: the dep need is a guess about a kernel that does
+    # not exist yet, and a mid-upgrade ENOSPC now recovers and retries
+    # in-run - do not block a conversion that empirically succeeds on
+    # ~105 MiB cloud ESPs. Below the hard floor is hopeless and aborts.
+    if [ -f "$MODULES_CONF" ]; then
+        if esp_fits "$esp" dep; then
+            ok "ESP has enough free space with MODULES=dep."
+            return 0
+        fi
+        free=$(free_kib "$esp")
+        if [ "$free" -ge "$ESP_FLOOR_DEP_KIB" ]; then
+            warn "ESP space is tight ($((free / 1024)) MiB free). Continuing anyway - if the kernel"
+            warn "copy still hits ENOSPC mid-upgrade, the tool cleans up, shrinks and retries."
+            return 0
         fi
     fi
     warn "The ESP ($esp) does not have enough free space for the Kali kernel+initrd."
@@ -2859,6 +3064,10 @@ on_exit() {
     local rc=$?
     [ "$rc" -eq 0 ] && return 0
     warn "Conversion did NOT complete (exit code $rc). The system may be part-Debian, part-Kali."
+    if $RECOVERY_RAN; then
+        warn "An automatic ESP cleanup and retry already ran and did not suffice; if a"
+        warn "re-run fails the same way, free ESP space manually first (see below)."
+    fi
     warn "Recover manually:"
     warn "  1. sudo dpkg --configure -a"
     warn "  2. sudo apt-get -f install"
@@ -2903,11 +3112,79 @@ conversion_complete() {
 }
 
 # Resume: put dpkg/apt back into a consistent state before re-running the
-# (idempotent) conversion steps.
+# (idempotent) conversion steps. The explicit || return 1 keeps a dpkg
+# failure fatal even when the caller runs this errexit-suppressed (the
+# retry wrapper does), instead of masking it behind a passing apt -f.
 repair_packages() {
-    log "Resuming: repairing any half-configured packages first"
-    dpkg --configure -a
+    log "Repairing any half-configured packages first"
+    dpkg --configure -a || return 1
     apt_ni -y -f install
+}
+
+# --- In-run ENOSPC recovery --------------------------------------------------
+# A mid-upgrade "No space left on device" on the ESP wedges dpkg; previously
+# the tool exited with guidance and required a manual resume run. The ladder
+# below automates that field-proven recovery between two attempts of the
+# failed step, so a single invocation converges even on the ~105 MiB ESPs of
+# fresh cloud droplets.
+
+# Last resort: drop every non-newest kernel's ESP copies and loader entries
+# from ALL token dirs. The /boot sources stay, and the newest kernel's files
+# land via the retried dpkg configure - but between eviction and that copy a
+# crash would leave no bootable entry, hence the explicit warning. Only our
+# own /boot versions are targeted; another OS's dirs hold different versions.
+evict_nonnewest_esp_copies() {
+    local esp="$1" v
+    local victims=()
+    mapfile -t victims < <(nonnewest_boot_kernels)
+    [ "${#victims[@]}" -gt 0 ] || return 0
+    warn "Last resort: remove the ESP boot files of non-newest kernel(s): ${victims[*]}"
+    warn "Their /boot sources stay and the newest kernel is copied right after - but if"
+    warn "this machine crashes before that copy finishes, it cannot boot on its own."
+    ask_yn "Evict them from the ESP to make room for the newest kernel?" || return 0
+    for v in "${victims[@]}"; do
+        remove_esp_version "$esp" "$v"
+    done
+    ok "Evicted ${#victims[@]} kernel version(s) from the ESP"
+    return 0
+}
+
+# Best-effort remediation between the two attempts of a failed step: clean ->
+# shrink -> evict -> repair, mirroring the manual recovery that resume mode
+# is built on. Cleaning MUST precede the dpkg repair - configure re-triggers
+# the ESP copy, and the truncated leftover otherwise re-breaks it. Every rung
+# is idempotent, prompted where it mutates, and guarded: the ladder never
+# aborts the run itself; the retry after it is the real verdict.
+esp_recovery_ladder() {
+    local esp
+    esp=$(find_esp)
+    if [ -n "$esp" ] && kernels_on_esp "$esp"; then
+        log_esp_inventory "$esp"
+        clean_stale_esp_copies "$esp"
+        offer_shrink "$esp" tolerant || true
+        # need is 0 when the newest pair already landed intact - the fit
+        # check then skips the eviction on its own.
+        if ! esp_fits "$esp" dep; then
+            evict_nonnewest_esp_copies "$esp"
+        fi
+    fi
+    # Generic dpkg/apt repair - also what makes non-ESP failures retryable.
+    repair_packages || true
+    return 0
+}
+
+# Run a conversion step; on failure, run the recovery ladder and retry ONCE.
+# The retry is deliberately unguarded: a second failure dies under set -e and
+# on_exit prints the manual guidance, with the resume marker intact.
+run_step_with_esp_recovery() {
+    local rc=0
+    "$@" || rc=$?
+    [ "$rc" -eq 0 ] && return 0
+    warn "Step failed (exit $rc): $* - attempting ESP recovery, then one retry"
+    RECOVERY_RAN=true
+    esp_recovery_ladder || true
+    log "Retrying: $*"
+    "$@"
 }
 
 # env var > state file > desktop detection. Resolved before the marker is
@@ -2985,6 +3262,35 @@ has_desktop() {
     return 1
 }
 
+# Success advisory for small ESPs: two kernel pairs never fit on them, so
+# the NEXT kernel ABI upgrade would hit the same mid-upgrade ENOSPC while old
+# and new coexist. Guidance only - the old kernel is the only known-good
+# fallback until the new one has survived a reboot. Runs after the EXIT trap
+# is gone, so every command is guarded: a cosmetic failure here must not turn
+# a completed conversion into a nonzero exit.
+post_conversion_esp_advice() {
+    local esp total v old_pkgs=""
+    esp=$(find_esp)
+    [ -n "$esp" ] || return 0
+    kernels_on_esp "$esp" || return 0
+    total=$(total_kib "$esp" 2>/dev/null) || return 0
+    [ -n "$total" ] && [ "$total" -lt "$ESP_SMALL_TOTAL_KIB" ] || return 0
+    while IFS= read -r v; do
+        old_pkgs="$old_pkgs linux-image-$v"
+    done < <(nonnewest_boot_kernels)
+    warn "This ESP ($esp, $((total / 1024)) MiB) is too small to hold two kernel+initrd"
+    warn "pairs, so a FUTURE kernel upgrade can hit 'No space left on device' again"
+    warn "while the old and the new version coexist."
+    if [ -n "$old_pkgs" ]; then
+        warn "After verifying the new kernel boots (sudo reboot, then uname -r), free the"
+        warn "ESP by purging the old one(s):"
+        warn "    sudo apt purge -y$old_pkgs"
+    fi
+    warn "Before each future kernel upgrade, purge the previous kernel first"
+    warn "(dpkg -l 'linux-image-*', then: sudo apt purge <old versions>)."
+    return 0
+}
+
 do_conversion() {
     # The keyring download needs only wget and the CA bundle, both present on
     # any normal install - skip refreshing the soon-to-be-disabled Debian
@@ -3000,14 +3306,15 @@ do_conversion() {
     log "Updating package lists from Kali"
     apt_ni update
     log "Rebasing base system onto kali-rolling (this can take a while)..."
-    apt_ni -y full-upgrade
+    run_step_with_esp_recovery apt_ni -y full-upgrade
     log "Installing kali-archive-keyring and ${KALI_METAPACKAGE}"
-    apt_ni install -y kali-archive-keyring "$KALI_METAPACKAGE"
+    run_step_with_esp_recovery apt_ni install -y kali-archive-keyring "$KALI_METAPACKAGE"
     log "Removing packages that are no longer required"
     apt_ni -y autoremove --purge
     finish_conversion
     ok "Conversion complete. New system identity:"
     grep -E '^(PRETTY_NAME|ID|VERSION)=' "$OS_RELEASE_FILE" | sed 's/^/    /'
+    post_conversion_esp_advice
     warn "A reboot is recommended: sudo reboot"
 }
 
@@ -3034,11 +3341,19 @@ main() {
         check_already_kali
         check_supported_distro
     fi
+    # Prompts (remediations, the YES confirmation) need a terminal; without
+    # one, reads would hang or mis-answer. Placed after the zero-work exits
+    # so probing an already-converted box without --yes stays a friendly
+    # exit 0, and before preflight so no remediation can mutate the system
+    # on a run that could never be confirmed.
+    if ! $ASSUME_YES && [ ! -t 0 ]; then
+        err "stdin is not a terminal; re-run with --yes for unattended use."
+    fi
     preflight
     resolve_metapackage
     confirm
     mark_conversion_started
-    if $RESUME; then repair_packages; fi
+    if $RESUME; then run_step_with_esp_recovery repair_packages; fi
     do_conversion
 }
 
