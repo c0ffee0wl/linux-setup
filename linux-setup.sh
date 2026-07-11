@@ -12,7 +12,7 @@ set -eo pipefail
 export LC_ALL=C.UTF-8
 export LANG=C.UTF-8
 
-VERSION="2.18.0"
+VERSION="2.19.0"
 FORCE_MODE=false
 NO_MODE=false
 NO_HACKING_TOOLS=false
@@ -2359,7 +2359,7 @@ set -eo pipefail
 export LC_ALL=C.UTF-8
 export LANG=C.UTF-8
 
-VERSION="1.3.0"
+VERSION="1.4.0"
 
 # Overridable paths/thresholds: production defaults; overridden by tests, or by
 # an operator to steer detection (e.g. ESP_PATH when auto-detection misfires).
@@ -2431,7 +2431,8 @@ boot files and surplus old kernels (never the running or the newest one),
 and on virtual machines to write a persistent MODULES=dep + xz initramfs
 config (revert instructions inside the written file) so the initrds shrink
 enough to fit. If the kernel copy still hits ENOSPC mid-upgrade, the tool
-cleans the ESP, shrinks the initrds and retries once on its own.
+cleans the ESP, then frees only as much space as needed (surplus kernels
+first, smaller initrds second) and retries once on its own.
 
 If a conversion is interrupted anyway, a marker is left at ${STATE_FILE} and
 re-running 'sudo upgrade-to-kali' repairs dpkg and resumes the conversion.
@@ -2783,6 +2784,11 @@ esp_fits() {
     [ "$free" -ge "$need" ]
 }
 
+# The MODULES policy in effect for newly generated initrds.
+effective_policy() {
+    if [ -f "$MODULES_CONF" ]; then printf 'dep'; else printf 'most'; fi
+}
+
 # True when both files exist but their sizes differ (a mid-copy ENOSPC leftover).
 size_mismatch() {
     [ -f "$1" ] && [ -f "$2" ] && [ "$(stat -c %s "$1")" != "$(stat -c %s "$2")" ]
@@ -3034,7 +3040,7 @@ preflight() {
     # not exist yet, and a mid-upgrade ENOSPC now recovers and retries
     # in-run - do not block a conversion that empirically succeeds on
     # ~105 MiB cloud ESPs. Below the hard floor is hopeless and aborts.
-    if [ -f "$MODULES_CONF" ]; then
+    if [ "$(effective_policy)" = dep ]; then
         if esp_fits "$esp" dep; then
             ok "ESP has enough free space with MODULES=dep."
             return 0
@@ -3129,16 +3135,21 @@ repair_packages() {
 # fresh cloud droplets.
 
 # Last resort: drop every non-newest kernel's ESP copies and loader entries
-# from ALL token dirs. The /boot sources stay, and the newest kernel's files
-# land via the retried dpkg configure - but between eviction and that copy a
-# crash would leave no bootable entry, hence the explicit warning. Only our
-# own /boot versions are targeted; another OS's dirs hold different versions.
+# from ALL token dirs - after the ladder's surplus purge that is normally
+# just the RUNNING kernel. ESP copies only, deliberately not a package
+# purge: removing the running kernel's /lib/modules would make every module
+# load fail (firewall, filesystems) for the rest of the conversion. The
+# /boot sources stay, and the newest kernel's files land via the retried
+# dpkg configure - but between eviction and that copy a crash would leave no
+# bootable entry, hence the explicit warning. Only our own /boot versions
+# are targeted; another OS's dirs hold different versions.
 evict_nonnewest_esp_copies() {
     local esp="$1" v
     local victims=()
     mapfile -t victims < <(nonnewest_boot_kernels)
     [ "${#victims[@]}" -gt 0 ] || return 0
-    warn "Last resort: remove the ESP boot files of non-newest kernel(s): ${victims[*]}"
+    warn "Last resort: remove the ESP boot files of non-newest kernel(s), usually"
+    warn "including the running one: ${victims[*]}"
     warn "Their /boot sources stay and the newest kernel is copied right after - but if"
     warn "this machine crashes before that copy finishes, it cannot boot on its own."
     ask_yn "Evict them from the ESP to make room for the newest kernel?" || return 0
@@ -3150,22 +3161,32 @@ evict_nonnewest_esp_copies() {
 }
 
 # Best-effort remediation between the two attempts of a failed step: clean ->
-# shrink -> evict -> repair, mirroring the manual recovery that resume mode
-# is built on. Cleaning MUST precede the dpkg repair - configure re-triggers
-# the ESP copy, and the truncated leftover otherwise re-breaks it. Every rung
-# is idempotent, prompted where it mutates, and guarded: the ladder never
-# aborts the run itself; the retry after it is the real verdict.
+# remove surplus kernels -> shrink -> evict -> repair, mirroring the manual
+# recovery that resume mode is built on, cheapest and safest space first.
+# Cleaning MUST precede the dpkg repair - configure re-triggers the ESP copy,
+# and the truncated leftover otherwise re-breaks it. A fit check gates every
+# mutating rung, so remediation stops as soon as there is room (need is 0
+# once the newest pair landed intact, and a non-ESP failure like a mirror
+# hiccup mutates nothing): the dep shrink is only offered when kernel
+# removal did not suffice, and the running kernel's ESP copies stay the last
+# resort. The policy is re-resolved before each check - offer_shrink may
+# have just written the conf. Every rung is idempotent, prompted where it
+# mutates, and guarded: the ladder never aborts the run itself; the retry
+# after it is the real verdict.
 esp_recovery_ladder() {
     local esp
     esp=$(find_esp)
     if [ -n "$esp" ] && kernels_on_esp "$esp"; then
         log_esp_inventory "$esp"
         clean_stale_esp_copies "$esp"
-        offer_shrink "$esp" tolerant || true
-        # need is 0 when the newest pair already landed intact - the fit
-        # check then skips the eviction on its own.
-        if ! esp_fits "$esp" dep; then
-            evict_nonnewest_esp_copies "$esp"
+        if ! esp_fits "$esp" "$(effective_policy)"; then
+            remove_surplus_kernels "$esp" || true
+            if ! esp_fits "$esp" "$(effective_policy)"; then
+                offer_shrink "$esp" tolerant || true
+                if ! esp_fits "$esp" "$(effective_policy)"; then
+                    evict_nonnewest_esp_copies "$esp"
+                fi
+            fi
         fi
     fi
     # Generic dpkg/apt repair - also what makes non-ESP failures retryable.
