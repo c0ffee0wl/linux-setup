@@ -2617,7 +2617,8 @@ find_esp() {
 # True when kernel-install copies kernels+initrds onto the ESP ($1).
 # Version dirs hold `linux`/`initrd` (upstream kernel-install naming) or
 # `vmlinuz-<ver>`/`initrd.img-<ver>` (Debian's systemd-boot hook naming) -
-# keep the naming variants in sync with clean_stale_esp_copies.
+# keep the naming variants in sync across all four sites that encode them:
+# kernels_on_esp, esp_token_dirs, esp_copy_intact, clean_stale_esp_copies.
 kernels_on_esp() {
     local esp="$1" token
     token=$(entry_token)
@@ -2637,7 +2638,8 @@ kernels_on_esp() {
 # former machine-ids, other installs sharing the ESP), one per line. Detected
 # by content - version subdirs with a kernel (`linux`/`vmlinuz-*`) or an
 # initrd (a mid-copy ENOSPC can leave a version dir holding only a truncated
-# initrd) - so EFI/ and loader/ are naturally excluded.
+# initrd) - so EFI/ and loader/ are naturally excluded. Naming variants
+# shared with kernels_on_esp (all four sites listed there - keep in sync).
 esp_token_dirs() {
     local esp="$1" d
     for d in "$esp"/*/; do
@@ -2664,7 +2666,8 @@ any_size_match() {
 
 # True when $esp/$2/$3 holds a complete copy of local kernel version $3:
 # kernel and initrd both present (either naming variant) and sizes matching
-# the /boot sources.
+# the /boot sources. Naming variants shared with kernels_on_esp (all four
+# sites listed there - keep in sync).
 esp_copy_intact() {
     local d="$1/$2/$3"
     any_size_match "$BOOT_DIR/vmlinuz-$3" "$d/linux" "$d/vmlinuz-$3" && \
@@ -2832,7 +2835,8 @@ clean_stale_esp_copies() {
                 if size_mismatch "$f" "$BOOT_DIR/initrd.img-$ver"; then stale+=("$f"); fi
             done
             # Kernel copy: `linux` (upstream naming) or `vmlinuz-<ver>` (Debian
-            # hook) - keep the naming variants in sync with kernels_on_esp.
+            # hook) - keep the naming variants in sync with kernels_on_esp
+            # (which lists all four sites that encode them).
             for f in "$verdir"linux "$verdir"vmlinuz-*; do
                 if size_mismatch "$f" "$BOOT_DIR/vmlinuz-$ver"; then stale+=("$f"); fi
             done
@@ -3010,6 +3014,8 @@ preflight() {
         warn "Low free space on /: $((rootfree / 1024)) MiB (recommended: >= $((ROOT_MIN_FREE_KIB / 1024)) MiB)."
     fi
     # ESP: fatal when kernels are copied there and room cannot be made.
+    # Remediation rung order (clean -> surplus kernels -> shrink) mirrors
+    # esp_recovery_ladder - keep the two in sync.
     local esp
     esp=$(find_esp)
     if [ -z "$esp" ]; then
@@ -3163,6 +3169,8 @@ evict_nonnewest_esp_copies() {
 # Best-effort remediation between the two attempts of a failed step: clean ->
 # remove surplus kernels -> shrink -> evict -> repair, mirroring the manual
 # recovery that resume mode is built on, cheapest and safest space first.
+# The clean/surplus/shrink rung order mirrors preflight's ESP remediation -
+# keep the two in sync (evict + repair are recovery-only tail rungs).
 # Cleaning MUST precede the dpkg repair - configure re-triggers the ESP copy,
 # and the truncated leftover otherwise re-breaks it. A fit check gates every
 # mutating rung, so remediation stops as soon as there is room (need is 0
