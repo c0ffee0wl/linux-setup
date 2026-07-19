@@ -101,6 +101,9 @@ The script supports the following command-line options:
 # Skip configuring the German XFCE keyboard layout (useful with --force)
 ./linux-setup.sh --no-keyboard-layout
 
+# Never create the temporary low-RAM swapfile
+./linux-setup.sh --no-swap
+
 # Apply only supply-chain hardening configs (no package installs, no shell changes)
 ./linux-setup.sh --harden-only
 ```
@@ -138,6 +141,9 @@ Use this flag to skip installation of hacking/pentest tools even when running on
 
 **No Keyboard Layout (`--no-keyboard-layout`):**
 Use this flag to skip configuring the German XFCE keyboard layout. By default this is only applied if you answer "Yes" to the interactive prompt (default: No), but `--force` auto-answers "Yes", so pass this flag together with `--force` to keep your existing keyboard layout in unattended runs.
+
+**No Swap (`--no-swap`):**
+On machines with less than ~2 GB RAM and no active swap, the script offers to create a temporary swapfile (`/linux-setup.swap`, removed automatically when the script exits) so the system upgrade and source builds can't be OOM-killed — cloud VMs typically ship with zero swap. `--force` auto-answers "Yes" to that prompt; pass this flag to never create the swapfile.
 
 **Harden Only (`--harden-only`):**
 Use this flag to apply only supply-chain hardening configurations without installing any packages or changing shell/terminal settings. This writes package manager configs (npm, Bun, Cargo, uv, pip), system-level fallback configs, telemetry opt-outs, and Go module hardening environment variables. Useful for:

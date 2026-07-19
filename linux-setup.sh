@@ -12,12 +12,13 @@ set -eo pipefail
 export LC_ALL=C.UTF-8
 export LANG=C.UTF-8
 
-VERSION="2.19.1"
+VERSION="2.20.0"
 FORCE_MODE=false
 NO_MODE=false
 NO_HACKING_TOOLS=false
 HARDEN_ONLY=false
 NO_KEYBOARD_LAYOUT=false
+NO_SWAP=false
 
 # Go module supply-chain policy - single source for the persistent exports in
 # ~/.profile (apply_supply_chain_hardening) and the in-process exports in
@@ -50,6 +51,7 @@ Options:
   --no, -n             Run in non-interactive mode, automatically answering 'No' to all prompts
   --no-hacking-tools   Skip installation of hacking/pentest tools (even on Kali)
   --no-keyboard-layout Skip configuring the German XFCE keyboard layout (useful with --force)
+  --no-swap            Never create the temporary low-RAM swapfile
   --harden-only        Apply only supply-chain hardening configs (no installs, no shell changes)
   --help, -h           Display this help message and exit
 
@@ -111,6 +113,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --no-keyboard-layout)
             NO_KEYBOARD_LAYOUT=true
+            shift
+            ;;
+        --no-swap)
+            NO_SWAP=true
             shift
             ;;
         --harden-only)
@@ -231,22 +237,31 @@ install_user_config() {
 # on sudo's command line rather than exported. DPkg::Lock::Timeout makes apt
 # wait for the lock instead of aborting when a boot-time apt job (cloud-init,
 # apt-daily, unattended-upgrades) still holds it - the classic cloud-init race.
+# Acquire::Retries re-fetches transiently failed downloads (flaky networking
+# right after a cloud VM boots) instead of failing the whole transaction.
 apt_get() {
     if [[ "$FORCE_MODE" == "true" || "$NO_MODE" == "true" ]]; then
         sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get \
-            -o DPkg::Lock::Timeout=300 \
+            -o DPkg::Lock::Timeout=300 -o Acquire::Retries=3 \
             -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold "$@"
     else
-        sudo apt-get -o DPkg::Lock::Timeout=300 "$@"
+        sudo apt-get -o DPkg::Lock::Timeout=300 -o Acquire::Retries=3 "$@"
     fi
 }
 
 # curl wrapper owning the download policy for every fetch in this script:
 # HTTPS-only, TLS >= 1.2, fail on HTTP errors, bounded timeouts so an
-# unreachable host can't stall the run. Callers append extra flags
-# (e.g. -o <file>); later flags override these defaults.
+# unreachable host can't stall the run, and bounded retries on transient
+# failures (timeouts, 408/429/5xx, connection refused - early-boot networking
+# on cloud VMs). --retry-max-time caps the CUMULATIVE retry window: --max-time
+# resets per attempt, so without it a repeatedly stalling transfer could run
+# retries x 300s (~20 min). Deliberately NOT --retry-all-errors: that would
+# also retry deterministic failures like 404, breaking repo_suite_published's
+# fast absence-probe semantics and masking real errors. Callers append extra
+# flags (e.g. -o <file>); later flags override these defaults.
 fetch_url() {
-    curl --proto '=https' --tlsv1.2 --connect-timeout 10 --max-time 300 -fsSL "$@"
+    curl --proto '=https' --tlsv1.2 --connect-timeout 10 --max-time 300 \
+        --retry 3 --retry-delay 2 --retry-max-time 300 --retry-connrefused -fsSL "$@"
 }
 
 # True when the vendor publishes an apt suite at <base_url>/dists/<suite>/Release.
@@ -254,7 +269,8 @@ fetch_url() {
 # (Docker and PowerShell repos); tighter timeouts than fetch_url's defaults
 # because a probe should fail fast.
 repo_suite_published() {
-    fetch_url --connect-timeout 5 --max-time 15 -I "$1/dists/$2/Release" > /dev/null 2>&1
+    fetch_url --connect-timeout 5 --max-time 15 --retry 2 --retry-delay 1 \
+        --retry-max-time 15 -I "$1/dists/$2/Release" > /dev/null 2>&1
 }
 
 # Download <url> to a mktemp file, then install it atomically at <dest>, so a
@@ -282,6 +298,15 @@ fetch_install() {
     return $rc
 }
 
+# A bare read failed with nothing captured: stdin is closed or exhausted (no
+# TTY - cloud-init/CI - or a finite piped stdin that ran out). Without this,
+# set -e would kill the run on the failed read with no explanation. Mirrors
+# the embedded upgrade-to-kali helper's non-tty stance.
+prompt_eof_abort() {
+    echo   # terminate the read -p prompt line (EOF echoed no newline)
+    error "No input available to answer: '$1'. Re-run with --force (auto-yes) or --no (auto-no) for unattended use."
+}
+
 # Prompt user with yes/no question
 # Usage: prompt_yes_no "Question?" "Y" (or "N" for default No)
 # Returns: 0 for yes, 1 for no
@@ -302,13 +327,12 @@ prompt_yes_no() {
         return 1
     fi
 
-    if [[ "$default" == "Y" ]]; then
-        read -p "$prompt (Y/n): " response
-        response=${response:-Y}
-    else
-        read -p "$prompt (y/N): " response
-        response=${response:-N}
-    fi
+    local suffix="(y/N)"
+    [[ "$default" == "Y" ]] && suffix="(Y/n)"
+    # `|| [ -n "$response" ]` salvages a final line without trailing newline
+    # (read still populates the variable on an EOF-terminated last line).
+    read -p "$prompt $suffix: " response || [ -n "$response" ] || prompt_eof_abort "$prompt"
+    response=${response:-$default}
 
     if [[ "$response" =~ ^[Yy]$ ]]; then
         return 0
@@ -862,6 +886,166 @@ install_rust_via_rustup() {
     log "Rust installed successfully via rustup"
 }
 
+#############################################################################
+# Low-RAM / low-disk accommodations (1 GB cloud droplets)
+#############################################################################
+# Env-overridable for testing without a real 1 GB VM (mirrors the embedded
+# upgrade-to-kali pattern): LOW_MEM_KIB=99999999 forces the low-RAM path.
+LOW_MEM_KIB="${LOW_MEM_KIB:-2000000}"        # ~1.9 GiB: below this, swap + throttled builds
+LOW_DISK_KIB="${LOW_DISK_KIB:-5242880}"      # 5 GiB: below this, warn only (never fatal)
+SWAP_FILE="${SWAP_FILE:-/linux-setup.swap}"  # distinctive name - never a user's /swapfile;
+                                             # deliberately not a dotfile so du/ncdu show it
+SWAP_SIZE_MIB="${SWAP_SIZE_MIB:-2048}"       # preferred; shrunk to 1024 when / is tight
+SWAP_MIN_FREE_MIB=4096                       # must remain free on / AFTER creating the file
+SWAP_ACTIVE=false                            # true while our swapfile is swapon'd
+
+free_kib()      { df -Pk "$1" | awk 'NR==2 {print $4}'; }
+mem_total_kib() { awk '/^MemTotal:/{print $2}' /proc/meminfo; }
+# Note: a nominal-2GB VM's MemTotal lands near LOW_MEM_KIB after kernel
+# reservations and may fall on either side - both outcomes are safe (extra
+# swap is harmless, throttling only slows builds). 1 GB VMs are always caught.
+is_low_memory() { [ "$(mem_total_kib)" -lt "$LOW_MEM_KIB" ]; }
+any_swap_active() { [ "$(wc -l < /proc/swaps)" -gt 1 ]; }  # header + >= 1 entry (incl. zram)
+
+# Warn-only free-space check on / (never fatal; a run may still succeed, and
+# setup_temp_swap does its own stricter sizing math).
+check_disk_space() {
+    local avail
+    avail=$(free_kib /)
+    if [ "${avail:-0}" -lt "$LOW_DISK_KIB" ]; then
+        warn "Low disk space: only $(( avail / 1024 )) MiB free on / (recommended: >= $(( LOW_DISK_KIB / 1024 / 1024 )) GiB). Continuing, but installs may fail."
+    fi
+}
+
+# EXIT-trap cleanup: swapoff + delete the temporary swapfile. Idempotent
+# (SWAP_ACTIVE guard) and tolerant: runs from the EXIT trap, so nothing in
+# here may fail the trap body or change the script's exit status.
+cleanup_temp_swap() {
+    [ "$SWAP_ACTIVE" = true ] || return 0
+    log "Removing temporary swapfile ${SWAP_FILE}..."
+    if sudo swapoff "$SWAP_FILE" 2>/dev/null; then
+        sudo rm -f "$SWAP_FILE" 2>/dev/null || true
+        SWAP_ACTIVE=false
+        log "Temporary swap removed"
+    else
+        # swapoff fails when swapped pages exceed free RAM (abort under memory
+        # pressure) or sudo can't re-authenticate inside the trap. Leave the
+        # file: the next run adopts and removes it.
+        warn "Could not release ${SWAP_FILE} now. Remove it later with:"
+        warn "  sudo swapoff ${SWAP_FILE} && sudo rm -f ${SWAP_FILE}"
+    fi
+    return 0
+}
+
+# Shared activate tail: flag + EXIT-trap arm + user notice, so every path
+# that turns swap on also arms the cleanup.
+mark_swap_active() {
+    SWAP_ACTIVE=true
+    trap cleanup_temp_swap EXIT
+    log "Temporary swap active (auto-removed when the script exits)"
+}
+
+# Create a temporary swapfile on low-RAM machines so the dist-upgrade, source
+# builds, and pdtm can't be OOM-killed (cloud VMs ship with zero swap).
+# Removed by cleanup_temp_swap via the EXIT trap. MUST be called after the
+# Phase 0 self-update: bash EXIT traps do not survive exec, so a trap armed
+# before the re-exec would never fire and the swapfile would leak. Only an
+# EXIT trap is used - bash runs it on set -e aborts and fatal signals too, and
+# detect_terminal_background installs/clears its own INT/TERM/HUP traps which
+# would clobber any of ours. Every exit path here is non-fatal by design.
+setup_temp_swap() {
+    if [ "$NO_SWAP" = true ]; then
+        log "Skipping temporary swap (--no-swap)"
+        return 0
+    fi
+    is_low_memory || return 0
+
+    # A previous run killed with SIGKILL (no EXIT trap fired) leaves our
+    # swapfile active: adopt it so THIS run's cleanup removes it.
+    if grep -q "^${SWAP_FILE}[[:space:]]" /proc/swaps 2>/dev/null; then
+        warn "Temporary swapfile from a previous interrupted run is still active - reusing it"
+        mark_swap_active
+        return 0
+    fi
+
+    if any_swap_active; then
+        log "Swap is already active - not adding a temporary swapfile"
+        return 0
+    fi
+
+    # Never place swap on RAM-backed or layered roots (live ISO, containers).
+    local fstype
+    fstype=$(findmnt -no FSTYPE / 2>/dev/null || echo unknown)
+    case "$fstype" in
+        tmpfs|ramfs|overlay|squashfs|unknown)
+            warn "Root filesystem is ${fstype} - skipping temporary swap"
+            return 0 ;;
+    esac
+
+    # Size to the available disk: prefer SWAP_SIZE_MIB, shrink to 1024 MiB
+    # when tight, skip when even that leaves < SWAP_MIN_FREE_MIB free on /.
+    local free_mib size_mib
+    free_mib=$(( $(free_kib /) / 1024 ))
+    size_mib="$SWAP_SIZE_MIB"
+    if [ $(( free_mib - size_mib )) -lt "$SWAP_MIN_FREE_MIB" ]; then
+        size_mib=1024
+    fi
+    if [ $(( free_mib - size_mib )) -lt "$SWAP_MIN_FREE_MIB" ]; then
+        warn "Only ${free_mib} MiB free on / - skipping temporary swap"
+        return 0
+    fi
+
+    if ! prompt_yes_no "Low RAM detected ($(( $(mem_total_kib) / 1024 )) MiB). Create a temporary ${size_mib} MiB swapfile at ${SWAP_FILE} for this run (removed automatically at the end)?" "Y"; then
+        log "Skipping temporary swap"
+        return 0
+    fi
+
+    # Stale non-active leftover (killed run + reboot): recreate from scratch
+    # so size and permissions are known-good.
+    if [ -e "$SWAP_FILE" ]; then
+        warn "Removing stale swapfile left by a previous run"
+        sudo rm -f "$SWAP_FILE"
+    fi
+
+    log "Creating ${size_mib} MiB temporary swapfile at ${SWAP_FILE}..."
+    # Create + chmod 600 BEFORE writing data (no world-readable window), and
+    # mark NOCOW on btrfs (the kernel rejects CoW/compressed swapfiles).
+    sudo touch "$SWAP_FILE"
+    sudo chmod 600 "$SWAP_FILE"
+    if [ "$fstype" = "btrfs" ]; then
+        sudo chattr +C "$SWAP_FILE" 2>/dev/null || true
+    fi
+
+    if ! sudo fallocate -l "${size_mib}M" "$SWAP_FILE" 2>/dev/null; then
+        # fallocate unsupported on this filesystem -> dd (slower, universal)
+        if ! sudo dd if=/dev/zero of="$SWAP_FILE" bs=1M count="$size_mib" status=none; then
+            warn "Could not create swapfile (disk full?) - continuing without swap"
+            sudo rm -f "$SWAP_FILE" 2>/dev/null || true
+            return 0
+        fi
+    fi
+
+    if sudo mkswap "$SWAP_FILE" > /dev/null && sudo swapon "$SWAP_FILE"; then
+        mark_swap_active
+        return 0
+    fi
+
+    # swapon can reject a fallocate'd file ("holes") on some filesystems:
+    # rewrite it with dd once, then give up non-fatally.
+    warn "swapon failed - retrying with a dd-written swapfile..."
+    sudo rm -f "$SWAP_FILE"
+    sudo touch "$SWAP_FILE"
+    sudo chmod 600 "$SWAP_FILE"
+    if sudo dd if=/dev/zero of="$SWAP_FILE" bs=1M count="$size_mib" status=none \
+        && sudo mkswap "$SWAP_FILE" > /dev/null && sudo swapon "$SWAP_FILE"; then
+        mark_swap_active
+    else
+        warn "Could not enable a temporary swapfile - continuing without swap"
+        sudo rm -f "$SWAP_FILE" 2>/dev/null || true
+    fi
+    return 0
+}
+
 if ! is_kali_linux; then
     warn "This script is primarily designed for Kali Linux. Continuing anyway..."
 fi
@@ -887,9 +1071,15 @@ if git rev-parse --git-dir > /dev/null 2>&1; then
 
     if [ "$BEHIND" -gt 0 ]; then
         log "Updates found! Pulling latest changes..."
-        git pull --ff-only
-        log "Re-executing updated script..."
-        exec "$0" "${ORIGINAL_ARGS[@]}" || error "Failed to re-execute updated script"
+        # Non-fatal: a network drop between the fetch above and this pull (or
+        # local commits making --ff-only refuse) must not abort a fresh-VM
+        # provisioning run; --ff-only leaves the tree untouched on failure.
+        if git pull --ff-only; then
+            log "Re-executing updated script..."
+            exec "$0" "${ORIGINAL_ARGS[@]}" || error "Failed to re-execute updated script"
+        else
+            warn "Self-update failed (network or git error) - continuing with current version v${VERSION}"
+        fi
     else
         log "Script is up to date"
     fi
@@ -910,6 +1100,20 @@ fi
 #############################################################################
 
 log "Starting Linux setup..."
+
+# Low-RAM / low-disk accommodations. Placed here deliberately: AFTER the
+# Phase 0 self-update (EXIT traps do not survive its exec) and BEFORE the
+# first heavy apt work, so the swap protects the dist-upgrade onward.
+check_disk_space
+setup_temp_swap
+if is_low_memory; then
+    # Cap build parallelism: cargo/go builds are the main OOM killers on 1 GB
+    # VMs even with swap. Composes with any inherited GOFLAGS; the hardened
+    # GOPROXY/GOSUMDB exports in install_go_tool are separate vars, untouched.
+    export CARGO_BUILD_JOBS=1
+    export GOFLAGS="${GOFLAGS:+$GOFLAGS }-p=1"
+    log "Low RAM: capping build parallelism (CARGO_BUILD_JOBS=1, GOFLAGS += -p=1)"
+fi
 
 # Refresh the Microsoft signing keys if a previous run configured those repos -
 # a key rotation on packages.microsoft.com would otherwise break the apt-get
@@ -2359,7 +2563,7 @@ set -eo pipefail
 export LC_ALL=C.UTF-8
 export LANG=C.UTF-8
 
-VERSION="1.5.0"
+VERSION="1.5.1"
 
 # Overridable paths/thresholds: production defaults; overridden by tests, or by
 # an operator to steer detection (e.g. ESP_PATH when auto-detection misfires).
@@ -2531,10 +2735,12 @@ ask_yn_no() {
     [ "$r" = "y" ] || [ "$r" = "Y" ]
 }
 
-# Non-interactive apt-get: lock-wait + safe conffile handling.
+# Non-interactive apt-get: lock-wait + safe conffile handling + bounded
+# download retries (a full-upgrade fetches hundreds of packages - one
+# transient mirror hiccup must not abort the conversion).
 apt_ni() {
     DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get \
-        -o DPkg::Lock::Timeout=300 \
+        -o DPkg::Lock::Timeout=300 -o Acquire::Retries=3 \
         -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold \
         "$@"
 }
@@ -3232,7 +3438,9 @@ resolve_metapackage() {
 install_keyring() {
     log "Installing Kali archive keyring -> $KEYRING_PATH"
     local tmp; tmp=$(mktemp)
-    if ! wget -qO "$tmp" "$KEYRING_URL"; then
+    # Bounded retries (default is 20 tries): same transient-failure policy as
+    # apt_ni's Acquire::Retries - one network blip must not abort the conversion.
+    if ! wget -q --tries=3 --waitretry=2 --retry-connrefused -O "$tmp" "$KEYRING_URL"; then
         rm -f "$tmp"; err "Failed to download Kali keyring from $KEYRING_URL"
     fi
     install -o root -g root -m 644 "$tmp" "$KEYRING_PATH"
@@ -3483,6 +3691,10 @@ apt_get clean
 go clean -cache -modcache || true
 uv cache clean || true
 rm -rf "$HOME/.cargo/registry/cache" "$HOME/.cargo/registry/src" "$HOME/.cargo/git/checkouts" 2>/dev/null || true
+# Release the temporary swapfile here (swapoff pages everything back into RAM
+# and can be slow) rather than after the success banner; the EXIT trap that
+# also calls this then no-ops via the SWAP_ACTIVE guard.
+cleanup_temp_swap
 
 # Configure Xfce keyboard layout to German
 if [[ "$NO_KEYBOARD_LAYOUT" == "true" ]]; then
@@ -3518,7 +3730,7 @@ fi
 if [ ${#FAILED_BUILDS[@]} -gt 0 ]; then
     warn "These optional tools were skipped after a failed build/download:"
     for t in "${FAILED_BUILDS[@]}"; do warn "  - $t"; done
-    warn "Your shell is fully configured regardless. Re-run to retry (on low-RAM VMs, add swap first)."
+    warn "Your shell is fully configured regardless. Re-run to retry."
 fi
 
 log "Setup complete!"
