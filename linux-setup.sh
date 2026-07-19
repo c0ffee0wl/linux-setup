@@ -12,7 +12,7 @@ set -eo pipefail
 export LC_ALL=C.UTF-8
 export LANG=C.UTF-8
 
-VERSION="2.20.0"
+VERSION="2.20.1"
 FORCE_MODE=false
 NO_MODE=false
 NO_HACKING_TOOLS=false
@@ -1327,7 +1327,22 @@ install_apt_package "pipx" "pipx"
 # whenever the venv exists, so a half-installed uv stayed broken on every re-run.
 log "Installing/updating uv..."
 export PATH=$HOME/.local/bin:$PATH
-pipx upgrade uv 2>/dev/null || pipx install --force uv
+if ! { pipx upgrade uv 2>/dev/null || pipx install --force uv; }; then
+    # Every pipx operation runs through its shared pip venv (.../pipx/shared).
+    # An in-place python upgrade (or an interrupted run) leaves it invalid, and
+    # pipx's own recovery - `python -m venv --clear` on the corpse - can itself
+    # fail (pypa/pipx#294; seen as ENOTEMPTY on a DO droplet), wedging every
+    # pipx command. The dir is a cache: safe to delete, rebuilt on the next
+    # pipx call - the fix recommended in that issue. Wipe it (platformdirs and
+    # legacy pipx <= 1.1 locations), retry once, and record a persistent
+    # failure in the end-of-run summary instead of aborting the whole run.
+    warn "pipx failed - resetting pipx's shared venv and retrying..."
+    for d in "${PIPX_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/pipx}/shared" "$HOME/.local/pipx/shared"; do
+        chmod -R u+rwX "$d" 2>/dev/null || true  # perm-broken trees defeat rm -rf otherwise
+        rm -rf "$d" 2>/dev/null || true
+    done
+    { pipx upgrade uv 2>/dev/null || pipx install --force uv; } || note_build_failure "uv"
+fi
 
 # Install Python tools with uv
 log "Installing Python tools with uv..."
