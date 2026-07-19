@@ -12,7 +12,7 @@ set -eo pipefail
 export LC_ALL=C.UTF-8
 export LANG=C.UTF-8
 
-VERSION="2.19.0"
+VERSION="2.19.1"
 FORCE_MODE=false
 NO_MODE=false
 NO_HACKING_TOOLS=false
@@ -1116,14 +1116,14 @@ fi
 install_apt_package "pipx" "pipx"
 
 # Install uv (modern Python package installer)
-log "Installing uv..."
+# `pipx upgrade` also re-links ~/.local/bin/uv, so it repairs a venv whose app
+# binaries were never linked (a run killed mid-install on a low-RAM VM), and it
+# fails fast when uv isn't installed at all - leaving the fallback to do the
+# first install. A plain `pipx install` does neither: it no-ops with exit 0
+# whenever the venv exists, so a half-installed uv stayed broken on every re-run.
+log "Installing/updating uv..."
 export PATH=$HOME/.local/bin:$PATH
-if ! command -v uv &> /dev/null; then
-    pipx install uv
-else
-    log "Updating uv..."
-    pipx upgrade uv 2>/dev/null || pipx install --force uv
-fi
+pipx upgrade uv 2>/dev/null || pipx install --force uv
 
 # Install Python tools with uv
 log "Installing Python tools with uv..."
