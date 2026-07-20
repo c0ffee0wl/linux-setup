@@ -12,7 +12,7 @@ set -eo pipefail
 export LC_ALL=C.UTF-8
 export LANG=C.UTF-8
 
-VERSION="2.20.1"
+VERSION="2.21.0"
 FORCE_MODE=false
 NO_MODE=false
 NO_HACKING_TOOLS=false
@@ -1325,9 +1325,24 @@ install_apt_package "pipx" "pipx"
 # fails fast when uv isn't installed at all - leaving the fallback to do the
 # first install. A plain `pipx install` does neither: it no-ops with exit 0
 # whenever the venv exists, so a half-installed uv stayed broken on every re-run.
+PIPX_DATA_DIR="${PIPX_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/pipx}"
+# True if the uv at path $1 is pipx's (a symlink resolving into a pipx venvs
+# dir). A foreign uv (standalone installer, cargo, distro package) resolves
+# elsewhere and is kept as-is: `pipx install --force` would delete an
+# installer's binary at ~/.local/bin/uv and replace it with pipx's own symlink.
+uv_is_pipx_managed() {
+    case "$(readlink -f "$1")" in
+        "$PIPX_DATA_DIR"/venvs/*|"$HOME/.local/pipx/venvs/"*) return 0 ;;
+    esac
+    return 1
+}
 log "Installing/updating uv..."
 export PATH=$HOME/.local/bin:$PATH
-if ! { pipx upgrade uv 2>/dev/null || pipx install --force uv; }; then
+uv_path=$(command -v uv || true)
+if [ -n "$uv_path" ] && ! uv_is_pipx_managed "$uv_path"; then
+    log "Existing non-pipx uv found at $uv_path - keeping it"
+    uv self update 2>/dev/null || true  # standalone builds only; no-ops elsewhere
+elif ! { pipx upgrade uv 2>/dev/null || pipx install --force uv; }; then
     # Every pipx operation runs through its shared pip venv (.../pipx/shared).
     # An in-place python upgrade (or an interrupted run) leaves it invalid, and
     # pipx's own recovery - `python -m venv --clear` on the corpse - can itself
@@ -1337,7 +1352,7 @@ if ! { pipx upgrade uv 2>/dev/null || pipx install --force uv; }; then
     # legacy pipx <= 1.1 locations), retry once, and record a persistent
     # failure in the end-of-run summary instead of aborting the whole run.
     warn "pipx failed - resetting pipx's shared venv and retrying..."
-    for d in "${PIPX_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/pipx}/shared" "$HOME/.local/pipx/shared"; do
+    for d in "$PIPX_DATA_DIR/shared" "$HOME/.local/pipx/shared"; do
         chmod -R u+rwX "$d" 2>/dev/null || true  # perm-broken trees defeat rm -rf otherwise
         rm -rf "$d" 2>/dev/null || true
     done
