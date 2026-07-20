@@ -12,7 +12,7 @@ set -eo pipefail
 export LC_ALL=C.UTF-8
 export LANG=C.UTF-8
 
-VERSION="2.21.0"
+VERSION="2.21.1"
 FORCE_MODE=false
 NO_MODE=false
 NO_HACKING_TOOLS=false
@@ -2482,21 +2482,26 @@ install_go_tool "gitsnip" "github.com/dagimg-dot/gitsnip/cmd/gitsnip@latest" upd
 # per IP and then fails with a misleading "not packaged for your arch" error.
 if apt_meets_min "zoxide" "$ZOXIDE_MIN"; then
     install_apt_package "zoxide" "zoxide"
-    # Drop a stale installer-placed copy so the apt binary wins on PATH
+    # Install succeeded (apt failures are fatal) - drop stale installer-placed
+    # and source-built copies so the apt binary wins on PATH
     rm -f "$HOME/.local/bin/zoxide"
+    remove_source_builds "zoxide"
 else
     log "Installing/updating zoxide via official install script..."
     ZOXIDE_INSTALLER=$(mktemp)
     # Non-fatal: a failed download/install records zoxide and continues (the
-    # .zshrc guards 'zoxide init' with $+commands[zoxide]). '&&'/'||' are
-    # left-associative, so this is (fetch_url && sh) || note_build_failure.
-    fetch_url -o "$ZOXIDE_INSTALLER" \
+    # .zshrc guards 'zoxide init' with $+commands[zoxide]). Stale ~/.cargo/bin
+    # copies from old runs are removed only AFTER a successful install - they
+    # may be the only working zoxide when the installer fails (see above).
+    if fetch_url -o "$ZOXIDE_INSTALLER" \
         https://raw.githubusercontent.com/ajeetdsouza/zoxide/main/install.sh \
-        && sh "$ZOXIDE_INSTALLER" --bin-dir "$HOME/.local/bin" \
-        || note_build_failure "zoxide"
+        && sh "$ZOXIDE_INSTALLER" --bin-dir "$HOME/.local/bin"; then
+        remove_source_builds "zoxide"
+    else
+        note_build_failure "zoxide"
+    fi
     rm -f "$ZOXIDE_INSTALLER"
 fi
-remove_source_builds "zoxide"   # drop stale ~/.cargo/bin copies from old runs
 
 # Install sd and delta: prefer a recent apt package (skips the cargo compile),
 # else build via cargo.
