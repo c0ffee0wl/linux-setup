@@ -12,7 +12,7 @@ set -eo pipefail
 export LC_ALL=C.UTF-8
 export LANG=C.UTF-8
 
-VERSION="2.21.1"
+VERSION="2.22.0"
 FORCE_MODE=false
 NO_MODE=false
 NO_HACKING_TOOLS=false
@@ -2598,7 +2598,7 @@ set -eo pipefail
 export LC_ALL=C.UTF-8
 export LANG=C.UTF-8
 
-VERSION="1.5.1"
+VERSION="1.6.0"
 
 # Overridable paths/thresholds: production defaults; overridden by tests, or by
 # an operator to steer detection (e.g. ESP_PATH when auto-detection misfires).
@@ -2607,7 +2607,16 @@ APT_DIR="${APT_DIR:-/etc/apt}"
 BACKUP_DIR="${BACKUP_DIR:-$APT_DIR/upgrade-to-kali-backup}"
 KEYRING_PATH="${KEYRING_PATH:-/usr/share/keyrings/kali-archive-keyring.gpg}"
 KEYRING_URL="${KEYRING_URL:-https://archive.kali.org/archive-keyring.gpg}"
+# An explicitly pinned mirror must never be overridden by the automatic
+# CDN failover in run_step_with_recovery - record the pin before defaulting.
+KALI_MIRROR_PINNED=false
+[ -n "${KALI_MIRROR:-}" ] && KALI_MIRROR_PINNED=true
 KALI_MIRROR="${KALI_MIRROR:-http://http.kali.org/kali}"
+# Failover target when the configured mirror keeps failing: Kali's official
+# Cloudflare-backed CDN mirror, the Kali devs' documented fallback advice.
+KALI_FALLBACK_MIRROR="${KALI_FALLBACK_MIRROR:-https://kali.download/kali}"
+NET_RETRIES="${NET_RETRIES:-2}"           # delayed retries per mirror/network failure
+NET_RETRY_DELAY="${NET_RETRY_DELAY:-20}"  # seconds before the first retry (then doubled)
 BOOT_DIR="${BOOT_DIR:-/boot}"
 ESP_PATH="${ESP_PATH:-}"
 MACHINE_ID_FILE="${MACHINE_ID_FILE:-/etc/machine-id}"
@@ -2632,7 +2641,10 @@ KALI_METAPACKAGE="${KALI_METAPACKAGE:-}"
 ASSUME_YES=false
 RESUME=false
 SKIP_PREFLIGHT=false
-RECOVERY_RAN=false
+RECOVERY_KIND=""   # cause of the final wrapped-step failure: ""/esp/network/unknown
+STEP_LOG=""        # captured output of the last failed step (path printed by on_exit)
+FORCE_IPV4=false   # set when a failure log shows IPv6 'Network is unreachable'
+MIRROR_FAILED_OVER=false  # sources switched to KALI_FALLBACK_MIRROR mid-run
 
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
     C_RED='\033[0;31m'; C_GREEN='\033[0;32m'; C_YELLOW='\033[1;33m'
@@ -2672,6 +2684,13 @@ config (revert instructions inside the written file) so the initrds shrink
 enough to fit. If the kernel copy still hits ENOSPC mid-upgrade, the tool
 cleans the ESP, then frees only as much space as needed (surplus kernels
 first, smaller initrds second) and retries once on its own.
+
+A failure that instead looks like a mirror/network problem (unreachable or
+half-synced mirror, broken IPv6 routing) gets delayed retries: the package
+lists are refreshed in between, IPv4 is forced when IPv6 is the culprit,
+and the last retry switches to the kali.download CDN mirror (unless
+KALI_MIRROR is set). Cached packages are kept, so retries and re-runs only
+fetch what is still missing.
 
 If a conversion is interrupted anyway, a marker is left at ${STATE_FILE} and
 re-running 'sudo upgrade-to-kali' repairs dpkg and resumes the conversion.
@@ -2774,10 +2793,12 @@ ask_yn_no() {
 # download retries (a full-upgrade fetches hundreds of packages - one
 # transient mirror hiccup must not abort the conversion).
 apt_ni() {
+    local extra=()
+    $FORCE_IPV4 && extra=(-o Acquire::ForceIPv4=true)
     DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get \
         -o DPkg::Lock::Timeout=300 -o Acquire::Retries=3 \
         -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold \
-        "$@"
+        "${extra[@]}" "$@"
 }
 
 # Timestamped copies go to $BACKUP_DIR - outside sources.list.d, so apt does
@@ -3317,10 +3338,24 @@ on_exit() {
     local rc=$?
     [ "$rc" -eq 0 ] && return 0
     warn "Conversion did NOT complete (exit code $rc). The system may be part-Debian, part-Kali."
-    if $RECOVERY_RAN; then
-        warn "An automatic ESP cleanup and retry already ran and did not suffice; if a"
-        warn "re-run fails the same way, free ESP space manually first (see below)."
+    if [ -n "$STEP_LOG" ] && [ -s "$STEP_LOG" ]; then
+        warn "Output of the failed step was kept at $STEP_LOG for inspection."
     fi
+    case "$RECOVERY_KIND" in
+        network)
+            warn "The failure looked like a mirror/network problem, not a disk-space one,"
+            warn "and the automatic delayed retries did not get through - check DNS,"
+            warn "firewall/proxy, and general connectivity."
+            $MIRROR_FAILED_OVER && warn "(The $KALI_FALLBACK_MIRROR CDN fallback was tried too.)"
+            warn "Downloaded packages are cached, so re-running 'sudo upgrade-to-kali'"
+            warn "resumes and only fetches what is still missing; to pin a mirror:"
+            warn "    sudo KALI_MIRROR=$KALI_FALLBACK_MIRROR upgrade-to-kali"
+            ;;
+        esp|unknown)
+            warn "An automatic ESP cleanup and retry already ran and did not suffice; if a"
+            warn "re-run fails the same way, free ESP space manually first (see below)."
+            ;;
+    esac
     warn "Recover manually:"
     warn "  1. sudo dpkg --configure -a"
     warn "  2. sudo apt-get -f install"
@@ -3443,18 +3478,101 @@ esp_recovery_ladder() {
     return 0
 }
 
-# Run a conversion step; on failure, run the recovery ladder and retry ONCE.
-# The retry is deliberately unguarded: a second failure dies under set -e and
-# on_exit prints the manual guidance, with the resume marker intact.
-run_step_with_esp_recovery() {
-    local rc=0
-    "$@" || rc=$?
-    [ "$rc" -eq 0 ] && return 0
-    warn "Step failed (exit $rc): $* - attempting ESP recovery, then one retry"
-    RECOVERY_RAN=true
-    esp_recovery_ladder || true
-    log "Retrying: $*"
-    "$@"
+# Classify a failed step from its captured output: esp | network | unknown.
+# Pure (reads only the file) so it is unit-testable via sourcing. ENOSPC is
+# checked FIRST - a mixed failure (dead mirror AND full ESP) needs space,
+# not patience. The network list covers dead/unreachable mirrors, DNS blips,
+# and mid-sync mirrors (hash/size mismatch - the fix is the same: refresh
+# lists and retry); pool-file 404s match via "Failed to fetch".
+classify_step_failure() {
+    if grep -qi 'No space left on device' "$1" 2>/dev/null; then
+        printf 'esp\n'
+    elif grep -qiE 'Unable to fetch|Failed to fetch|Cannot initiate the connection|Network is unreachable|Temporary failure resolving|Connection timed out|Connection refused|Connection reset by peer|Could not connect|Could not resolve|Error reading from server|Hash Sum mismatch|File has unexpected size|Mirror sync in progress' "$1" 2>/dev/null; then
+        printf 'network\n'
+    else
+        printf 'unknown\n'
+    fi
+}
+
+# apt tried an IPv6 address (the parenthesized address contains a colon) and
+# the kernel said the network is unreachable: broken v6 routing, common on
+# VMs/VPNs. Standard remedy is ForceIPv4 - safe, because an IPv6-only host
+# was already failing over v4 anyway.
+log_shows_broken_ipv6() {
+    grep -qE 'connection to [^ ]* ?\([0-9a-fA-F:]*:[0-9a-fA-F:]*\)[^(]*\(101: Network is unreachable\)' "$1" 2>/dev/null
+}
+
+# Run a conversion step, teeing its output (still streamed) to a temp log so
+# a failure can be classified and the matching recovery chosen: the ESP
+# ladder for ENOSPC, delayed retries for mirror/network fetch errors (apt's
+# cache means a retry only fetches what is still missing - deliberately no
+# --fix-missing, a distro rebase must not proceed with missing packages),
+# and the ladder + one retry for anything else (previous behavior). The
+# failure is re-classified after every attempt (a network failure's retry
+# can hit ENOSPC next), with hard budgets - the ladder runs at most once,
+# network retries at most NET_RETRIES times. Each network retry refreshes
+# the lists so the http.kali.org redirector can hand out a healthier
+# mirror, forces IPv4 once broken v6 routing is seen, and the last one
+# fails over to the kali.download CDN (never overriding a user-pinned
+# KALI_MIRROR). When the budgets are spent the last rc is
+# returned and dies under set -e at the call site; RECOVERY_KIND (set only
+# then, so a recovered step never poisons a later failure's message) and
+# STEP_LOG steer on_exit's guidance.
+# NOTE: the step runs on the left of a pipeline, i.e. in a subshell -
+# wrapped steps must not mutate globals (apt_ni/repair_packages do not).
+# The wrapper body itself runs in the main shell, which is why its
+# FORCE_IPV4/KALI_MIRROR mutations stick.
+run_step_with_recovery() {
+    local rc kind logf ladder_ran=false net_left="$NET_RETRIES" delay="$NET_RETRY_DELAY"
+    logf=$(mktemp) || logf=/dev/null   # degrades to kind=unknown
+    STEP_LOG="$logf"
+    while :; do
+        rc=0
+        "$@" 2>&1 | tee "$logf" || rc=${PIPESTATUS[0]}
+        if [ "$rc" -eq 0 ]; then
+            [ "$logf" = /dev/null ] || rm -f "$logf"
+            STEP_LOG=""
+            return 0
+        fi
+        kind=$(classify_step_failure "$logf")
+        case "$kind" in
+            network)
+                if [ "$net_left" -gt 0 ]; then
+                    net_left=$((net_left - 1))
+                    warn "Step failed (exit $rc): $* - looks like a mirror/network failure,"
+                    warn "not a disk-space one. Retrying in ${delay}s (cached .debs are kept)."
+                    if ! $FORCE_IPV4 && log_shows_broken_ipv6 "$logf"; then
+                        FORCE_IPV4=true
+                        warn "IPv6 routing looks broken - forcing IPv4 for all further apt calls"
+                    fi
+                    # MIRROR_FAILED_OVER is global: net_left resets per wrapped
+                    # step, so a later step's failure must not redo the failover.
+                    if [ "$net_left" -eq 0 ] && ! $KALI_MIRROR_PINNED && ! $MIRROR_FAILED_OVER; then
+                        MIRROR_FAILED_OVER=true
+                        KALI_MIRROR="$KALI_FALLBACK_MIRROR"
+                        warn "Failing over to the CDN mirror $KALI_MIRROR for the last retry"
+                        warn "(it stays in your sources afterwards - both are official Kali mirrors)"
+                        write_kali_sources
+                    fi
+                    sleep "$delay"; delay=$((delay * 2))
+                    apt_ni update || true
+                    log "Retrying: $*"
+                    continue
+                fi
+                ;;
+            esp|unknown)
+                if ! $ladder_ran; then
+                    ladder_ran=true
+                    warn "Step failed (exit $rc): $* - attempting ESP recovery, then one retry"
+                    esp_recovery_ladder || true
+                    log "Retrying: $*"
+                    continue
+                fi
+                ;;
+        esac
+        RECOVERY_KIND="$kind"
+        return "$rc"
+    done
 }
 
 # env var > state file > desktop detection. Resolved before the marker is
@@ -3576,11 +3694,11 @@ do_conversion() {
     write_kali_sources
     disable_debian_sources
     log "Updating package lists from Kali"
-    apt_ni update
+    run_step_with_recovery apt_ni update
     log "Rebasing base system onto kali-rolling (this can take a while)..."
-    run_step_with_esp_recovery apt_ni -y full-upgrade
+    run_step_with_recovery apt_ni -y full-upgrade
     log "Installing kali-archive-keyring and ${KALI_METAPACKAGE}"
-    run_step_with_esp_recovery apt_ni install -y kali-archive-keyring "$KALI_METAPACKAGE"
+    run_step_with_recovery apt_ni install -y kali-archive-keyring "$KALI_METAPACKAGE"
     log "Removing packages that are no longer required"
     apt_ni -y autoremove --purge
     # Drop the multi-GB .deb cache the rebase left behind. Best-effort: the
@@ -3628,7 +3746,7 @@ main() {
     resolve_metapackage
     confirm
     mark_conversion_started
-    if $RESUME; then run_step_with_esp_recovery repair_packages; fi
+    if $RESUME; then run_step_with_recovery repair_packages; fi
     do_conversion
 }
 
