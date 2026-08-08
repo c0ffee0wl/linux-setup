@@ -72,7 +72,7 @@ Built for a fresh install and safe to re-run: it skips whatever is already in pl
 
 - **OS**: Debian-based Linux distribution (Ubuntu, Debian, Kali Linux)
 - **Network**: Internet connection for package downloads
-- **Storage**: ~2GB free space for all tools and dependencies
+- **Storage**: at least 5 GB free on `/` recommended (the script warns, but continues, below that)
 
 ## Installation
 
@@ -89,7 +89,7 @@ The script supports the following command-line options:
 
 ```bash
 ./linux-setup.sh           # Interactive mode (default) - prompts for user confirmation
-./linux-setup.sh --force   # Non-interactive mode - auto-answers "Yes" to all prompts
+./linux-setup.sh --force   # Non-interactive mode - auto-answers "Yes" to all prompts (--yes works too)
 ./linux-setup.sh --help    # Display usage information
 
 # NOT RECOMMENDED ON FIRST RUN, because then some customizations are not installed
@@ -117,12 +117,14 @@ By default, the script will prompt you for confirmation on certain actions:
 - Overwriting existing Terminator configuration (default: No)
 - Overwriting existing tmux configuration (default: No)
 - Configuring German keyboard layout in XFCE (default: No; skip entirely with `--no-keyboard-layout`)
+- Creating the temporary swapfile (default: Yes; only on low-RAM machines with no active swap, see `--no-swap`)
+- Applying the ufw-docker firewall rules (default: Yes; only when UFW is already active)
 
 **Notes:**
 - The script makes a timestamped backup before overwriting any file
 - All package installations (Docker, Go, Rust, Bun, tools, etc.) happen automatically without prompts
 
-**Force Mode (`--force` or `-f`):**
+**Force Mode (`--force`/`-f`, also `--yes`/`-y`):**
 Use this flag to run the script non-interactively, automatically answering "Yes" to all prompts. This is useful for:
 - Automated/unattended installations
 - Running in scripts or provisioning tools
@@ -143,7 +145,7 @@ Use this flag to skip installation of hacking/pentest tools even when running on
 Use this flag to skip configuring the German XFCE keyboard layout. By default this is only applied if you answer "Yes" to the interactive prompt (default: No), but `--force` auto-answers "Yes", so pass this flag together with `--force` to keep your existing keyboard layout in unattended runs.
 
 **No Swap (`--no-swap`):**
-On machines with less than ~2 GB RAM and no active swap, the script offers to create a temporary swapfile (`/linux-setup.swap`, removed automatically when the script exits) so the system upgrade and source builds can't be OOM-killed — cloud VMs typically ship with zero swap. `--force` auto-answers "Yes" to that prompt; pass this flag to never create the swapfile.
+On machines with less than ~2 GB RAM and no active swap, the script offers to create a temporary swapfile (`/linux-setup.swap`, removed automatically when the script exits) so the system upgrade and source builds can't be OOM-killed (cloud VMs typically ship with zero swap). `--force` auto-answers "Yes" to that prompt; pass this flag to never create the swapfile.
 
 **Harden Only (`--harden-only`):**
 Use this flag to apply only supply-chain hardening configurations without installing any packages or changing shell/terminal settings. This writes package manager configs (npm, Bun, Cargo, uv, pip), system-level fallback configs, telemetry opt-outs, and Go module hardening environment variables. Useful for:
@@ -205,10 +207,7 @@ The script sets Terminator as the default terminal, with custom keybindings and 
 **Search & Navigation:**
 - `Ctrl+F` - Search in terminal output
 
-**Terminal Features:**
-- **Copy on selection** - Text is automatically copied when selected
-- **Infinite scrollback** - Never lose terminal history
-- **Tab numbers plugin** - Visual tab numbers for easy navigation
+The config also enables copy-on-selection (selected text lands on the clipboard right away), infinite scrollback, and a tab-numbers plugin that shows each tab's number for quick switching.
 
 > **Note**: `Super` key is typically the Windows/Command key on most keyboards.
 
@@ -450,7 +449,7 @@ yq -p=toml '.' pyproject.toml
 
 ### Arrow Key History Search
 
-The shell is configured with incremental history search using the up/down arrow keys. Simply type the beginning of a command and press the up arrow to search backward through commands that start with what you've typed, or down arrow to search forward.
+The shell is configured with incremental history search using the up/down arrow keys. Type the beginning of a command and press the up arrow to search backward through commands that start with what you've typed, or down arrow to search forward.
 
 ```bash
 # Type a command prefix, then press up/down arrows
@@ -782,16 +781,7 @@ lg()
 }
 ```
 
-**Key Features**:
-- **Stage individual lines** - Partial staging with intuitive interface
-- **Interactive rebase** - Squash, fixup, drop, edit, reorder commits visually
-- **Cherry-pick** - Visual cherry-picking of commits
-- **Amend old commits** - Fix commits deep in history
-- **Undo/Redo** - Easy mistake recovery
-- **Commit graph** - Visualize branch structure
-- **Git worktrees** - Manage multiple working trees
-- **Custom commands** - Define your own keybindings
-- **Rebase magic** - Create custom patches interactively
+It can stage individual lines, run interactive rebases (squash, fixup, drop, edit, reorder), cherry-pick visually, amend commits deep in history, and undo or redo mistakes. It also draws the commit graph, manages git worktrees, builds custom patches interactively, and lets you define your own commands and keybindings.
 
 **Common Keyboard Shortcuts** (inside lazygit):
 - `Space` - Stage/unstage files or hunks
@@ -828,16 +818,7 @@ lazydocker
 echo "alias lzd='lazydocker'" >> ~/.zshrc
 ```
 
-**Key Features**:
-- **Container overview** - View all containers and services at a glance
-- **Real-time logs** - Stream logs from containers with color coding
-- **Metrics graphs** - ASCII graphs of CPU, memory, and network usage
-- **Quick actions** - Restart, remove, rebuild containers with single keys
-- **Image management** - View image layers and ancestry
-- **Pruning** - Clean up unused containers, images, and volumes
-- **Mouse support** - Click to navigate (optional)
-- **Custom commands** - Define your own shortcuts
-- **docker-compose support** - Full integration with compose services
+It shows every container and compose service at a glance, streams color-coded logs, and draws ASCII graphs of CPU, memory, and network usage. Single keys restart, remove, or rebuild containers; you can inspect image layers and ancestry, prune unused containers, images, and volumes, and add your own custom commands. Mouse navigation works too, if you prefer clicking.
 
 **Common Keyboard Shortcuts** (inside lazydocker):
 - `[` / `]` - Previous / next tab in the main view (logs, stats, config)
@@ -865,15 +846,15 @@ echo "alias lzd='lazydocker'" >> ~/.zshrc
 The script writes a self-contained `~/.tmux.conf` with no plugin manager and no network dependency. It uses **emacs** key bindings to match the shell's emacs-style line editing, and leaves the default `Ctrl+B` prefix alone so the shell's `Ctrl+A` (beginning-of-line) still works.
 
 **What it configures:**
-- **emacs keys** in copy mode and at the command prompt (`mode-keys` / `status-keys`)
-- **Mouse support** - click a pane, drag a border, or scroll the wheel
-- **50,000-line scrollback** so long output doesn't scroll away
-- **Truecolor** (24-bit) via `tmux-256color` + `RGB`
-- **System clipboard** (OSC 52) - copies reach the host clipboard, even over SSH
-- **Windows and panes numbered from 1**, and renumbered when one closes
-- **New windows and splits open in the current directory**
-- **Custom window names stay put** - a name you set with `prefix ,` isn't overwritten by the running program
-- Instant `Esc` (no key-sequence delay) and focus events for editors
+- emacs keys in copy mode and at the command prompt (`mode-keys` / `status-keys`)
+- Mouse support: click a pane, drag a border, or scroll the wheel
+- 50,000-line scrollback so long output doesn't scroll away
+- Truecolor (24-bit) via `tmux-256color` + `RGB`
+- System clipboard (OSC 52), so copies reach the host clipboard even over SSH
+- Windows and panes numbered from 1, and renumbered when one closes
+- New windows and splits open in the current directory
+- Custom window names stay put: a name you set with `prefix ,` isn't overwritten by the running program
+- Near-instant `Esc` (10 ms key-sequence delay, low enough not to notice) and focus events for editors
 
 **Handy keys** (default prefix `Ctrl+B`):
 - `prefix` + `r` - reload the config
@@ -899,10 +880,10 @@ What it does:
 1. Runs a disk-space preflight. On systemd-boot systems the kernel and the full initrd get copied onto the EFI System Partition, and Kali initrds (~200 MB) are far larger than Debian's. A DigitalOcean droplet's ESP is about 105 MiB, so an unchecked upgrade would die midway through. To make room, the preflight offers to delete stale boot files and duplicates stranded under an old machine id (cloud images regenerate the machine id on first boot), to purge surplus kernels (never the running or the newest one), and, on VMs, to write a `MODULES=dep` + xz initramfs config that shrinks the initrds to a fraction of their size. If the ESP is too small even for that, it aborts with manual instructions before touching anything (`--skip-preflight` overrides).
 2. Adds the Kali `kali-rolling` repository and archive keyring
 3. **Disables** the existing Debian repositories, since Kali doesn't support mixing Debian and Kali repos (backups go to `/etc/apt/upgrade-to-kali-backup/`)
-4. Runs `apt full-upgrade` against `kali-rolling`, which rebases the base system onto Kali. If the kernel copy still hits `No space left on device` on the ESP, the tool recovers by itself: it deletes the truncated copy, then walks through the same remediations starting with the least destructive one, re-checking after each whether the kernel now fits. Surplus kernels go first, smaller initrds second, and as a last resort it evicts the running kernel's boot files from the ESP (the sources in `/boot` stay). Then it repairs dpkg and retries the upgrade once. A failure that instead looks like a mirror or network problem (unreachable mirror, mid-sync hash/size mismatch, DNS blip) gets delayed retries with a package-list refresh in between — already-downloaded packages are cached, so a retry only fetches what's missing. When the log shows apt failing over IPv6 with "Network is unreachable" (broken IPv6 routing), the rest of the run forces IPv4, and the last retry switches the sources to Kali's `kali.download` CDN mirror in case the `http.kali.org` geo-redirector keeps handing out the same dead mirror (skipped when you pinned a mirror via `KALI_MIRROR`; the CDN — an official Kali mirror — stays in the sources afterwards, and a resumed run reuses it and the forced-IPv4 setting instead of rediscovering the failure). The package-list update itself only gets the network retries — an update failure that is neither transient nor disk-space-related (bad repository signature, clock skew) fails fast with apt's error instead of triggering any space remediation.
+4. Runs `apt full-upgrade` against `kali-rolling`, which rebases the base system onto Kali. If the kernel copy still hits `No space left on device` on the ESP, the tool recovers by itself: it deletes the truncated copy, then walks through the same remediations starting with the least destructive one, re-checking after each whether the kernel now fits. Surplus kernels go first, smaller initrds second, and as a last resort it evicts the running kernel's boot files from the ESP (the sources in `/boot` stay). Then it repairs dpkg and retries the upgrade once. A failure that instead looks like a mirror or network problem (unreachable mirror, mid-sync hash/size mismatch, DNS blip) gets delayed retries with a package-list refresh in between; already-downloaded packages are cached, so a retry only fetches what's missing. When the log shows apt failing over IPv6 with "Network is unreachable" (broken IPv6 routing), the rest of the run forces IPv4, and the last retry switches the sources to Kali's `kali.download` CDN mirror in case the `http.kali.org` geo-redirector keeps handing out the same dead mirror (skipped when you pinned a mirror via `KALI_MIRROR`; the CDN is an official Kali mirror and stays in the sources afterwards, and a resumed run reuses it and the forced-IPv4 setting instead of rediscovering the failure). The package-list update itself only gets the network retries: an update failure that is neither transient nor disk-space-related (bad repository signature, clock skew) fails fast with apt's error instead of triggering any space remediation.
 5. Installs a Kali metapackage: `kali-linux-default` if a desktop is detected, otherwise `kali-linux-headless` (override with the `KALI_METAPACKAGE` env var)
 
-If the conversion still fails midway (network down for good, Ctrl-C), it prints recovery commands matched to what actually went wrong — mirror/network failures get "re-run to resume, apt only fetches what's still missing, pin a mirror with `KALI_MIRROR`" instead of ESP advice — plus the path to the failed step's captured output, and leaves a marker at `/var/lib/upgrade-to-kali/state`. Just re-run `sudo upgrade-to-kali`: it repairs dpkg and resumes where it left off. The `MODULES=dep` config written on VMs persists after conversion; revert instructions are inside the file (`/etc/initramfs-tools/conf.d/upgrade-to-kali-modules.conf`). On an ESP too small to hold two kernel pairs, the tool finishes with a warning: once the new kernel has survived a reboot, purge the old one, and purge the previous kernel before every future kernel upgrade. Otherwise the next kernel update runs into the same out-of-space error.
+If the conversion still fails midway (network down for good, Ctrl-C), it prints recovery commands matched to what actually went wrong (mirror/network failures get "re-run to resume, apt only fetches what's still missing, pin a mirror with `KALI_MIRROR`" instead of ESP advice), plus the path to the failed step's captured output, and leaves a marker at `/var/lib/upgrade-to-kali/state`. Just re-run `sudo upgrade-to-kali`: it repairs dpkg and resumes where it left off. The `MODULES=dep` config written on VMs persists after conversion; revert instructions are inside the file (`/etc/initramfs-tools/conf.d/upgrade-to-kali-modules.conf`). On an ESP too small to hold two kernel pairs, the tool finishes with a warning: once the new kernel has survived a reboot, purge the old one, and purge the previous kernel before every future kernel upgrade. Otherwise the next kernel update runs into the same out-of-space error.
 
 > **Important**: This is effectively irreversible, so take a VM snapshot or backup first. It only works on Debian, not Ubuntu. From Debian 12 (bookworm) it's a larger jump than from 13, because the rebase skips a Debian release. After it finishes, reboot and (optionally) re-run `linux-setup.sh`; it will detect Kali this time and install the pentest tooling.
 
