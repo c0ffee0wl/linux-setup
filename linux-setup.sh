@@ -12,7 +12,7 @@ set -eo pipefail
 export LC_ALL=C.UTF-8
 export LANG=C.UTF-8
 
-VERSION="2.22.0"
+VERSION="2.22.1"
 FORCE_MODE=false
 NO_MODE=false
 NO_HACKING_TOOLS=false
@@ -2598,7 +2598,7 @@ set -eo pipefail
 export LC_ALL=C.UTF-8
 export LANG=C.UTF-8
 
-VERSION="1.6.0"
+VERSION="1.6.1"
 
 # Overridable paths/thresholds: production defaults; overridden by tests, or by
 # an operator to steer detection (e.g. ESP_PATH when auto-detection misfires).
@@ -2642,6 +2642,7 @@ ASSUME_YES=false
 RESUME=false
 SKIP_PREFLIGHT=false
 RECOVERY_KIND=""   # cause of the final wrapped-step failure: ""/esp/network/unknown
+RECOVERY_LADDER_RAN=false  # whether that failing step ran the ESP ladder (steers on_exit)
 STEP_LOG=""        # captured output of the last failed step (path printed by on_exit)
 FORCE_IPV4=false   # set when a failure log shows IPv6 'Network is unreachable'
 MIRROR_FAILED_OVER=false  # sources switched to KALI_FALLBACK_MIRROR mid-run
@@ -2714,6 +2715,16 @@ parse_args() {
 kv_get() {
     [ -r "$1" ] || return 0
     grep -E "^$2=" "$1" 2>/dev/null | head -1 | cut -d= -f2- || true
+}
+
+# Persist key $1 = value $2 into the state marker (replacing any previous
+# value) so a resume run inherits recovery state learned mid-run (failed-over
+# mirror, forced IPv4). No-op before the marker exists; never fatal - losing
+# a recovery hint must not abort the conversion.
+state_set() {
+    [ -f "$STATE_FILE" ] || return 0
+    sed -i "/^$1=/d" "$STATE_FILE" 2>/dev/null || true
+    printf '%s=%s\n' "$1" "$2" >> "$STATE_FILE" 2>/dev/null || true
 }
 
 # Read KEY from an os-release-format file: kv_get plus quote-stripping.
@@ -3352,8 +3363,14 @@ on_exit() {
             warn "    sudo KALI_MIRROR=$KALI_FALLBACK_MIRROR upgrade-to-kali"
             ;;
         esp|unknown)
-            warn "An automatic ESP cleanup and retry already ran and did not suffice; if a"
-            warn "re-run fails the same way, free ESP space manually first (see below)."
+            if $RECOVERY_LADDER_RAN; then
+                warn "An automatic ESP cleanup and retry already ran and did not suffice; if a"
+                warn "re-run fails the same way, free ESP space manually first (see below)."
+            else
+                warn "The failure looks neither transient nor disk-space-related (bad repository"
+                warn "signatures, clock skew, and broken sources land here) - fix the cause shown"
+                warn "in the output above first, then re-run to resume."
+            fi
             ;;
     esac
     warn "Recover manually:"
@@ -3376,6 +3393,11 @@ mark_conversion_started() {
         # Any /boot kernel newer than this was installed by the conversion -
         # esp_required_kib measures it instead of guessing.
         printf 'baseline_kernel=%s\n' "$(newest_boot_kernel)"
+        # Recovery state restored by the resume branch - keep it across this
+        # wholesale rewrite (if, not &&: a false guard as the block's last
+        # command would fail the compound command under set -e).
+        if $MIRROR_FAILED_OVER; then printf 'mirror=%s\n' "$KALI_MIRROR"; fi
+        if $FORCE_IPV4; then printf 'force_ipv4=true\n'; fi
     } > "$STATE_FILE"
     trap on_exit EXIT
 }
@@ -3497,9 +3519,11 @@ classify_step_failure() {
 # apt tried an IPv6 address (the parenthesized address contains a colon) and
 # the kernel said the network is unreachable: broken v6 routing, common on
 # VMs/VPNs. Standard remedy is ForceIPv4 - safe, because an IPv6-only host
-# was already failing over v4 anyway.
+# was already failing over v4 anyway. Matches both of apt's connect errno
+# templates: "Cannot initiate the connection to ..." (synchronous connect)
+# and "Could not connect to ..." (deferred SO_ERROR path).
 log_shows_broken_ipv6() {
-    grep -qE 'connection to [^ ]* ?\([0-9a-fA-F:]*:[0-9a-fA-F:]*\)[^(]*\(101: Network is unreachable\)' "$1" 2>/dev/null
+    grep -qE 'connect(ion)? to [^ ]* ?\([0-9a-fA-F:]*:[0-9a-fA-F:]*\)[^(]*\(101: Network is unreachable\)' "$1" 2>/dev/null
 }
 
 # Run a conversion step, teeing its output (still streamed) to a temp log so
@@ -3515,14 +3539,21 @@ log_shows_broken_ipv6() {
 # mirror, forces IPv4 once broken v6 routing is seen, and the last one
 # fails over to the kali.download CDN (never overriding a user-pinned
 # KALI_MIRROR). When the budgets are spent the last rc is
-# returned and dies under set -e at the call site; RECOVERY_KIND (set only
-# then, so a recovered step never poisons a later failure's message) and
-# STEP_LOG steer on_exit's guidance.
+# returned and dies under set -e at the call site; RECOVERY_KIND and
+# RECOVERY_LADDER_RAN (both set only then, so a recovered step never poisons
+# a later failure's message) and STEP_LOG steer on_exit's guidance.
+# --no-ladder marks a step that cannot benefit from ESP cleanup (the list
+# update writes to /var/lib/apt, not the ESP): network failures still get
+# the delayed retries, but esp/unknown causes fail fast like the unwrapped
+# pre-1.6.0 behavior - a GPG/clock-skew/broken-sources error must never
+# trigger kernel purges or ESP mutations under --yes.
 # NOTE: the step runs on the left of a pipeline, i.e. in a subshell -
 # wrapped steps must not mutate globals (apt_ni/repair_packages do not).
 # The wrapper body itself runs in the main shell, which is why its
 # FORCE_IPV4/KALI_MIRROR mutations stick.
 run_step_with_recovery() {
+    local ladder_ok=true
+    if [ "$1" = "--no-ladder" ]; then ladder_ok=false; shift; fi
     local rc kind logf ladder_ran=false net_left="$NET_RETRIES" delay="$NET_RETRY_DELAY"
     logf=$(mktemp) || logf=/dev/null   # degrades to kind=unknown
     STEP_LOG="$logf"
@@ -3543,6 +3574,7 @@ run_step_with_recovery() {
                     warn "not a disk-space one. Retrying in ${delay}s (cached .debs are kept)."
                     if ! $FORCE_IPV4 && log_shows_broken_ipv6 "$logf"; then
                         FORCE_IPV4=true
+                        state_set force_ipv4 true
                         warn "IPv6 routing looks broken - forcing IPv4 for all further apt calls"
                     fi
                     # MIRROR_FAILED_OVER is global: net_left resets per wrapped
@@ -3550,6 +3582,7 @@ run_step_with_recovery() {
                     if [ "$net_left" -eq 0 ] && ! $KALI_MIRROR_PINNED && ! $MIRROR_FAILED_OVER; then
                         MIRROR_FAILED_OVER=true
                         KALI_MIRROR="$KALI_FALLBACK_MIRROR"
+                        state_set mirror "$KALI_MIRROR"
                         warn "Failing over to the CDN mirror $KALI_MIRROR for the last retry"
                         warn "(it stays in your sources afterwards - both are official Kali mirrors)"
                         write_kali_sources
@@ -3561,7 +3594,7 @@ run_step_with_recovery() {
                 fi
                 ;;
             esp|unknown)
-                if ! $ladder_ran; then
+                if $ladder_ok && ! $ladder_ran; then
                     ladder_ran=true
                     warn "Step failed (exit $rc): $* - attempting ESP recovery, then one retry"
                     esp_recovery_ladder || true
@@ -3571,6 +3604,7 @@ run_step_with_recovery() {
                 ;;
         esac
         RECOVERY_KIND="$kind"
+        RECOVERY_LADDER_RAN=$ladder_ran
         return "$rc"
     done
 }
@@ -3694,7 +3728,7 @@ do_conversion() {
     write_kali_sources
     disable_debian_sources
     log "Updating package lists from Kali"
-    run_step_with_recovery apt_ni update
+    run_step_with_recovery --no-ladder apt_ni update
     log "Rebasing base system onto kali-rolling (this can take a while)..."
     run_step_with_recovery apt_ni -y full-upgrade
     log "Installing kali-archive-keyring and ${KALI_METAPACKAGE}"
@@ -3730,6 +3764,21 @@ main() {
             exit 0
         fi
         warn "Interrupted conversion detected ($STATE_FILE) - resuming."
+        # Reuse recovery state the interrupted run learned, instead of
+        # re-burning the retry budget rediscovering a dead mirror or broken
+        # IPv6. An env-pinned mirror still wins (same precedence as
+        # KALI_METAPACKAGE: env > state file).
+        local saved_mirror
+        saved_mirror=$(kv_get "$STATE_FILE" mirror)
+        if [ -n "$saved_mirror" ] && ! $KALI_MIRROR_PINNED; then
+            KALI_MIRROR="$saved_mirror"
+            MIRROR_FAILED_OVER=true
+            log "Reusing the fallback mirror from the interrupted run: $KALI_MIRROR"
+        fi
+        if [ "$(kv_get "$STATE_FILE" force_ipv4)" = "true" ]; then
+            FORCE_IPV4=true
+            log "Reusing forced IPv4 from the interrupted run"
+        fi
     else
         check_already_kali
         check_supported_distro
